@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/williamokano/sentinelsnap/internal/config"
 	"github.com/williamokano/sentinelsnap/internal/domain"
+	"github.com/williamokano/sentinelsnap/internal/hub"
 	"github.com/williamokano/sentinelsnap/internal/repository"
 	"github.com/williamokano/sentinelsnap/internal/storage"
 )
@@ -23,11 +24,12 @@ import (
 type SnapHandler struct {
 	repo    repository.SnapRepository
 	storage storage.StorageProvider
+	hub     *hub.Hub
 	cfg     *config.Config
 }
 
-func NewSnapHandler(repo repository.SnapRepository, store storage.StorageProvider, cfg *config.Config) *SnapHandler {
-	return &SnapHandler{repo: repo, storage: store, cfg: cfg}
+func NewSnapHandler(repo repository.SnapRepository, store storage.StorageProvider, h *hub.Hub, cfg *config.Config) *SnapHandler {
+	return &SnapHandler{repo: repo, storage: store, hub: h, cfg: cfg}
 }
 
 // flexFloat64 unmarshals from both JSON number and string,
@@ -134,12 +136,14 @@ func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	writeJSON(w, http.StatusCreated, domain.Snap{
+	snap := domain.Snap{
 		ID:        snapID,
 		Latitude:  float64(req.Latitude),
 		Longitude: float64(req.Longitude),
 		Photos:    photos,
-	})
+	}
+	h.hub.Broadcast("snap", snap)
+	writeJSON(w, http.StatusCreated, snap)
 }
 
 func (h *SnapHandler) ServePhoto(w http.ResponseWriter, r *http.Request) {
@@ -195,6 +199,7 @@ func (h *SnapHandler) DeleteSnap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.hub.Broadcast("snap_deleted", map[string]int64{"id": id})
 	w.WriteHeader(http.StatusNoContent)
 }
 

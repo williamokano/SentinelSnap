@@ -12,12 +12,13 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/williamokano/sentinelsnap/internal/config"
 	"github.com/williamokano/sentinelsnap/internal/handler"
+	"github.com/williamokano/sentinelsnap/internal/hub"
 )
 
 //go:embed static
 var staticFiles embed.FS
 
-func New(cfg *config.Config, h *handler.SnapHandler) http.Handler {
+func New(cfg *config.Config, h *handler.SnapHandler, ev *hub.Hub) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -30,6 +31,7 @@ func New(cfg *config.Config, h *handler.SnapHandler) http.Handler {
 	r.Get("/snaps", h.ListSnaps)
 	r.Delete("/snaps/{id}", h.DeleteSnap)
 	r.Get("/photos/{token}", h.ServePhoto)
+	r.Get("/events", ev.ServeSSE)
 
 	staticFS, _ := fs.Sub(staticFiles, "static")
 	r.Handle("/*", http.FileServer(http.FS(staticFS)))

@@ -9,6 +9,7 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/williamokano/sentinelsnap/internal/config"
 	"github.com/williamokano/sentinelsnap/internal/handler"
+	"github.com/williamokano/sentinelsnap/internal/hub"
 	"github.com/williamokano/sentinelsnap/internal/migrate"
 	"github.com/williamokano/sentinelsnap/internal/repository/postgres"
 	"github.com/williamokano/sentinelsnap/internal/router"
@@ -45,8 +46,9 @@ func main() {
 		log.Fatalf("unknown storage backend: %q (supported: local)", cfg.StorageBackend)
 	}
 
-	h := handler.NewSnapHandler(repo, store, cfg)
-	r := router.New(cfg, h)
+	ev := hub.New()
+	h := handler.NewSnapHandler(repo, store, ev, cfg)
+	r := router.New(cfg, h, ev)
 
 	addr := fmt.Sprintf(":%d", cfg.HTTPPort)
 	log.Printf("listening on %s", addr)
