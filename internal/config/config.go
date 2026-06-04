@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+
+	"github.com/joho/godotenv"
 )
 
 type Config struct {
@@ -25,6 +27,9 @@ type Config struct {
 }
 
 func Load() (*Config, error) {
+	// Load .env if present; ignore error when file doesn't exist (e.g. in Docker)
+	_ = godotenv.Load()
+
 	port, _ := strconv.Atoi(getEnv("HTTP_PORT", "8080"))
 	dsn := os.Getenv("DB_DSN")
 	if dsn == "" {
