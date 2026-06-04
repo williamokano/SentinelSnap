@@ -30,6 +30,84 @@ func postBody(lat, lng float64, photos []string) []byte {
 	return b
 }
 
+func postBodyRaw(raw map[string]any) []byte {
+	b, _ := json.Marshal(raw)
+	return b
+}
+
+func TestCreateSnap_LatLngAsStrings(t *testing.T) {
+	repo := &repoMock.SnapRepository{}
+	store := &storageMock.StorageProvider{}
+
+	repo.On("CreateSnap", mock.Anything, mock.Anything).Return(int64(1), nil)
+	store.On("Put", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", nil).Once()
+	store.On("URL", mock.Anything).Return("/uploads/snaps/1/abc.jpg").Once()
+	repo.On("AddPhoto", mock.Anything, mock.Anything).Return(int64(1), nil).Once()
+
+	body := postBodyRaw(map[string]any{
+		"latitude":  "52.5200",
+		"longitude": "13.4050",
+		"photos":    []string{b64("imgdata")},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/snaps", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	newHandler(repo, store).CreateSnap(w, req)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.InDelta(t, 52.52, resp["latitude"], 0.0001)
+	assert.InDelta(t, 13.405, resp["longitude"], 0.0001)
+}
+
+func TestCreateSnap_LatLngAsNumbers(t *testing.T) {
+	repo := &repoMock.SnapRepository{}
+	store := &storageMock.StorageProvider{}
+
+	repo.On("CreateSnap", mock.Anything, mock.Anything).Return(int64(1), nil)
+	store.On("Put", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", nil).Once()
+	store.On("URL", mock.Anything).Return("/uploads/snaps/1/abc.jpg").Once()
+	repo.On("AddPhoto", mock.Anything, mock.Anything).Return(int64(1), nil).Once()
+
+	body := postBodyRaw(map[string]any{
+		"latitude":  52.5200,
+		"longitude": 13.4050,
+		"photos":    []string{b64("imgdata")},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/snaps", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	newHandler(repo, store).CreateSnap(w, req)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.InDelta(t, 52.52, resp["latitude"], 0.0001)
+	assert.InDelta(t, 13.405, resp["longitude"], 0.0001)
+}
+
+func TestCreateSnap_LatLngInvalidString(t *testing.T) {
+	repo := &repoMock.SnapRepository{}
+	store := &storageMock.StorageProvider{}
+
+	body := postBodyRaw(map[string]any{
+		"latitude":  "not-a-number",
+		"longitude": "13.4050",
+		"photos":    []string{b64("imgdata")},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/snaps", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	newHandler(repo, store).CreateSnap(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	repo.AssertNotCalled(t, "CreateSnap")
+}
+
 func TestCreateSnap_Success(t *testing.T) {
 	repo := &repoMock.SnapRepository{}
 	store := &storageMock.StorageProvider{}
