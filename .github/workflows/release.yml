@@ -9,13 +9,24 @@ on:
         description: 'Tag to build (e.g. v0.1.0)'
         required: true
         type: string
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g. v0.1.0)'
+        required: true
+        type: string
+    secrets:
+      DOCKER_USERNAME:
+        required: true
+      DOCKER_PASSWORD:
+        required: true
 
 permissions:
   contents: write
   packages: write
 
 env:
-  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   goreleaser:
