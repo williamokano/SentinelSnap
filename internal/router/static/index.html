@@ -67,7 +67,7 @@
         bounds.push(latlng);
 
         const photosHtml = (snap.photos || []).map(p =>
-          `<img src="${p.url}" alt="photo" data-url="${p.url}" />`
+          `<img src="${p.url}" alt="photo" onclick="openLightbox(this.src)" />`
         ).join('');
 
         const popupHtml = `
@@ -78,11 +78,6 @@
 
         const marker = L.marker(latlng).addTo(map);
         marker.bindPopup(popupHtml, { maxWidth: 320 });
-        marker.on('popupopen', () => {
-          document.querySelectorAll('.popup-photos img').forEach(img => {
-            img.onclick = () => openLightbox(img.dataset.url);
-          });
-        });
       });
 
       if (bounds.length > 0) {
