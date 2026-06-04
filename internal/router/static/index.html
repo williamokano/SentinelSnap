@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SentinelSnap</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: system-ui, sans-serif; display: flex; flex-direction: column; height: 100vh; }
@@ -31,8 +33,10 @@
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
   <script>
     const markers = new Map();
+    const clusterGroup = L.markerClusterGroup();
 
     const map = L.map('map').setView([20, 0], 2);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -53,8 +57,8 @@
       if (!confirm(`Delete snap #${id}? This cannot be undone.`)) return;
       const res = await fetch(`/snaps/${id}`, { method: 'DELETE' });
       if (res.ok) {
-        markers.get(id)?.remove();
-        markers.delete(id);
+        const m = markers.get(id);
+        if (m) { clusterGroup.removeLayer(m); markers.delete(id); }
       } else {
         alert('Failed to delete snap.');
       }
@@ -92,11 +96,13 @@
           <button class="btn-delete" onclick="deleteSnap(${snap.id})">Delete</button>
         `;
 
-        const marker = L.marker(latlng).addTo(map);
+        const marker = L.marker(latlng);
         marker.bindPopup(popupHtml, { maxWidth: 320 });
+        clusterGroup.addLayer(marker);
         markers.set(snap.id, marker);
       });
 
+      map.addLayer(clusterGroup);
       if (bounds.length > 0) {
         map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
       }
