@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/williamokano/sentinelsnap/internal/config"
 	"github.com/williamokano/sentinelsnap/internal/domain"
@@ -26,10 +27,32 @@ func NewSnapHandler(repo repository.SnapRepository, store storage.StorageProvide
 	return &SnapHandler{repo: repo, storage: store, cfg: cfg}
 }
 
+// flexFloat64 unmarshals from both JSON number and string,
+// because iOS Shortcuts sends coordinates as strings.
+type flexFloat64 float64
+
+func (f *flexFloat64) UnmarshalJSON(data []byte) error {
+	var n float64
+	if err := json.Unmarshal(data, &n); err == nil {
+		*f = flexFloat64(n)
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	n, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return err
+	}
+	*f = flexFloat64(n)
+	return nil
+}
+
 type createSnapRequest struct {
-	Latitude  float64  `json:"latitude"`
-	Longitude float64  `json:"longitude"`
-	Photos    []string `json:"photos"`
+	Latitude  flexFloat64 `json:"latitude"`
+	Longitude flexFloat64 `json:"longitude"`
+	Photos    []string    `json:"photos"`
 }
 
 func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
@@ -51,8 +74,8 @@ func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	snapID, err := h.repo.CreateSnap(ctx, &domain.Snap{
-		Latitude:  req.Latitude,
-		Longitude: req.Longitude,
+		Latitude:  float64(req.Latitude),
+		Longitude: float64(req.Longitude),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not create snap")
@@ -107,8 +130,8 @@ func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusCreated, domain.Snap{
 		ID:        snapID,
-		Latitude:  req.Latitude,
-		Longitude: req.Longitude,
+		Latitude:  float64(req.Latitude),
+		Longitude: float64(req.Longitude),
 		Photos:    photos,
 	})
 }
