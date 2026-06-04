@@ -136,6 +136,36 @@ func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *SnapHandler) DeleteSnap(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid snap id")
+		return
+	}
+
+	snap, err := h.repo.GetSnapByID(r.Context(), id)
+	if err != nil {
+		if err == domain.ErrNotFound {
+			writeError(w, http.StatusNotFound, "snap not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "could not fetch snap")
+		return
+	}
+
+	for _, p := range snap.Photos {
+		_ = h.storage.Delete(r.Context(), p.StoredKey)
+	}
+
+	if err := h.repo.DeleteSnap(r.Context(), id); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not delete snap")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *SnapHandler) ListSnaps(w http.ResponseWriter, r *http.Request) {
 	snaps, err := h.repo.ListSnaps(r.Context())
 	if err != nil {
