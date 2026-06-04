@@ -6,22 +6,17 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 type LocalStorage struct {
 	baseDir string
-	baseURL string
 }
 
-func New(baseDir, baseURL string) (*LocalStorage, error) {
+func New(baseDir string) (*LocalStorage, error) {
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, fmt.Errorf("create upload dir: %w", err)
 	}
-	return &LocalStorage{
-		baseDir: baseDir,
-		baseURL: strings.TrimRight(baseURL, "/"),
-	}, nil
+	return &LocalStorage{baseDir: baseDir}, nil
 }
 
 func (s *LocalStorage) Put(_ context.Context, key string, r io.Reader, _ string) (string, error) {
@@ -45,5 +40,5 @@ func (s *LocalStorage) Delete(_ context.Context, key string) error {
 }
 
 func (s *LocalStorage) URL(key string) string {
-	return s.baseURL + "/" + key
+	return "/uploads/" + key
 }
