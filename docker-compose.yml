@@ -2,15 +2,15 @@ services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: sentinelsnap
-      POSTGRES_USER: sentinel
-      POSTGRES_PASSWORD: sentinel
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sentinel -d sentinelsnap"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -18,12 +18,12 @@ services:
   app:
     build: .
     ports:
-      - "8080:8080"
+      - "${HTTP_PORT:-8080}:8080"
     environment:
-      DB_DSN: postgres://sentinel:sentinel@db:5432/sentinelsnap?sslmode=disable
-      STORAGE_BACKEND: local
-      LOCAL_UPLOAD_DIR: /app/uploads
-      LOCAL_BASE_URL: http://localhost:8080/uploads
+      DB_DSN: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      LOCAL_UPLOAD_DIR: ${LOCAL_UPLOAD_DIR:-/app/uploads}
+      LOCAL_BASE_URL: ${LOCAL_BASE_URL:-http://localhost:8080/uploads}
     volumes:
       - ./uploads:/app/uploads
     depends_on:
