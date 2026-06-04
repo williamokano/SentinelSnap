@@ -8,17 +8,21 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: write
+
 jobs:
   tag:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create and push tag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="v${{ github.event.inputs.version }}"
+          VERSION="${{ github.event.inputs.version }}"
+          TAG="v${VERSION#v}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag "$TAG"
