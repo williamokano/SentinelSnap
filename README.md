@@ -23,10 +23,11 @@ You open the map on any browser and see every snap pinned at its exact location.
 ### iOS Shortcuts
 
 1. Open the **Shortcuts** app and create a new shortcut.
-2. Add **Take Photo** — set it to take 2 photos, disable the camera preview (set _Show Camera Preview_ to off so it runs silently).
-3. Add **Get Current Location** — this gives you `Latitude` and `Longitude`.
-4. Add a **Base64 Encode** action for each photo (encode the image file).
-5. Add a **Get Contents of URL** action:
+2. Add **Take Photo** — set it to take 1 photo, disable the camera preview (set _Show Camera Preview_ to off so it runs silently). Store the result in a variable named `Photo1`.
+3. Add **Encode Media** (Base64) immediately after — set the input to `Photo1`. Store the result in a variable named `Photo1Base64`.
+4. Repeat steps 2–3 for the second photo: take another photo into `Photo2`, then encode it into `Photo2Base64`.
+5. Add **Get Current Location** — this gives you `Latitude` and `Longitude`.
+6. Add a **Get Contents of URL** action:
    - URL: `http://<your-server-ip>:8080/snaps`
    - Method: `POST`
    - Headers: `Content-Type: application/json`
@@ -36,12 +37,12 @@ You open the map on any browser and see every snap pinned at its exact location.
        "latitude": <Latitude>,
        "longitude": <Longitude>,
        "photos": [
-         "<Base64 of photo 1>",
-         "<Base64 of photo 2>"
+         "<Photo1Base64>",
+         "<Photo2Base64>"
        ]
      }
      ```
-6. Add the shortcut to your **Home Screen** or trigger it via **Back Tap** (Settings → Accessibility → Touch → Back Tap) so it runs with a triple-tap on the back of the phone — discreet and fast.
+7. Add the shortcut to your **Home Screen** or trigger it via **Back Tap** (Settings → Accessibility → Touch → Back Tap) so it runs with a triple-tap on the back of the phone — discreet and fast.
 
 ### Android (Tasker + HTTP Request Plugin)
 
