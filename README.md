@@ -36,16 +36,8 @@ You open the map on any browser and see every snap pinned at its exact location.
        "latitude": <Latitude>,
        "longitude": <Longitude>,
        "photos": [
-         {
-           "filename": "photo1.jpg",
-           "content_type": "image/jpeg",
-           "data": "<Base64 of photo 1>"
-         },
-         {
-           "filename": "photo2.jpg",
-           "content_type": "image/jpeg",
-           "data": "<Base64 of photo 2>"
-         }
+         "<Base64 of photo 1>",
+         "<Base64 of photo 2>"
        ]
      }
      ```
@@ -117,7 +109,6 @@ All variables can be set in a `.env` file (loaded automatically at startup) or p
 | `POSTGRES_PASSWORD` | — | Database password (used by docker-compose) |
 | `STORAGE_BACKEND` | `local` | Storage backend (`local`) |
 | `LOCAL_UPLOAD_DIR` | `./uploads` | Directory where photos are saved |
-| `LOCAL_BASE_URL` | `http://localhost:8080/uploads` | Public base URL for serving photos |
 | `ENV_FILE` | `.env` | Path to the env file to load |
 
 S3 support (`S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`) is wired in the config but not yet implemented in the storage layer.
@@ -137,14 +128,13 @@ Create a new snap with one or more photos.
   "latitude": 37.7749,
   "longitude": -122.4194,
   "photos": [
-    {
-      "filename": "photo.jpg",
-      "content_type": "image/jpeg",
-      "data": "<base64-encoded image>"
-    }
+    "<base64-encoded image>",
+    "<base64-encoded image>"
   ]
 }
 ```
+
+`photos` is a plain array of base64-encoded image bytes. The server detects the content type automatically (JPEG, PNG, GIF, WebP) and generates a random filename — no metadata needed from the client.
 
 **Response `201`:**
 
