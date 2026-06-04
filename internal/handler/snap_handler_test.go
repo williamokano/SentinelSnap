@@ -36,7 +36,8 @@ func TestCreateSnap_Success(t *testing.T) {
 
 	repo.On("CreateSnap", mock.Anything, mock.Anything).Return(int64(7), nil)
 	store.On("Put", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-		Return("http://localhost/uploads/snaps/7/a.jpg", nil).Twice()
+		Return("", nil).Twice()
+	store.On("URL", mock.Anything).Return("/uploads/snaps/7/a.jpg").Twice()
 	repo.On("AddPhoto", mock.Anything, mock.Anything).Return(int64(1), nil).Once()
 	repo.On("AddPhoto", mock.Anything, mock.Anything).Return(int64(2), nil).Once()
 
@@ -96,7 +97,8 @@ func TestCreateSnap_StorageFailure_Rollback(t *testing.T) {
 	repo.On("CreateSnap", mock.Anything, mock.Anything).Return(int64(7), nil)
 	// First photo succeeds, second fails.
 	store.On("Put", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-		Return("http://localhost/uploads/snaps/7/a.jpg", nil).Once()
+		Return("", nil).Once()
+	store.On("URL", mock.Anything).Return("/uploads/snaps/7/a.jpg").Once()
 	repo.On("AddPhoto", mock.Anything, mock.Anything).Return(int64(1), nil).Once()
 	store.On("Put", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return("", assert.AnError).Once()
@@ -143,10 +145,11 @@ func TestListSnaps_WithData(t *testing.T) {
 	snaps := []domain.Snap{
 		{
 			ID: 1, Latitude: 37.77, Longitude: -122.41,
-			Photos: []domain.Photo{{ID: 10, SnapID: 1, URL: "http://localhost/uploads/snaps/1/p.jpg"}},
+			Photos: []domain.Photo{{ID: 10, SnapID: 1, StoredKey: "snaps/1/p.jpg"}},
 		},
 	}
 	repo.On("ListSnaps", mock.Anything).Return(snaps, nil)
+	store.On("URL", "snaps/1/p.jpg").Return("/uploads/snaps/1/p.jpg").Once()
 
 	req := httptest.NewRequest(http.MethodGet, "/snaps", nil)
 	w := httptest.NewRecorder()

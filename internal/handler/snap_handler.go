@@ -94,8 +94,7 @@ func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 			ct = "application/octet-stream"
 		}
 
-		url, err := h.storage.Put(ctx, key, bytes.NewReader(raw), ct)
-		if err != nil {
+		if _, err := h.storage.Put(ctx, key, bytes.NewReader(raw), ct); err != nil {
 			rollback()
 			writeError(w, http.StatusInternalServerError, "could not store photo")
 			return
@@ -104,7 +103,6 @@ func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 
 		photoID, err := h.repo.AddPhoto(ctx, &domain.Photo{
 			SnapID:    snapID,
-			URL:       url,
 			StoredKey: key,
 		})
 		if err != nil {
@@ -116,7 +114,7 @@ func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 		photos = append(photos, domain.Photo{
 			ID:        photoID,
 			SnapID:    snapID,
-			URL:       url,
+			URL:       h.storage.URL(key),
 			StoredKey: key,
 		})
 	}
@@ -135,6 +133,11 @@ func (h *SnapHandler) ListSnaps(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not list snaps")
 		return
+	}
+	for i := range snaps {
+		for j := range snaps[i].Photos {
+			snaps[i].Photos[j].URL = h.storage.URL(snaps[i].Photos[j].StoredKey)
+		}
 	}
 	writeJSON(w, http.StatusOK, snaps)
 }
