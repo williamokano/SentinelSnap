@@ -6,7 +6,7 @@ import (
 )
 
 type StorageProvider interface {
-	Put(ctx context.Context, key string, r io.Reader, contentType string) (url string, err error)
+	Put(ctx context.Context, key string, r io.Reader, contentType string) error
+	Get(ctx context.Context, key string) (io.ReadCloser, string, error)
 	Delete(ctx context.Context, key string) error
-	URL(key string) string
 }

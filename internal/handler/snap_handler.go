@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -103,9 +104,10 @@ func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 		}
 
 		ct := http.DetectContentType(raw)
+		token := randomID()
 		key := fmt.Sprintf("snaps/%d/%s%s", snapID, randomID(), extForContentType(ct))
 
-		if _, err := h.storage.Put(ctx, key, bytes.NewReader(raw), ct); err != nil {
+		if err := h.storage.Put(ctx, key, bytes.NewReader(raw), ct); err != nil {
 			rollback()
 			writeError(w, http.StatusInternalServerError, "could not store photo")
 			return
@@ -115,6 +117,7 @@ func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 		photoID, err := h.repo.AddPhoto(ctx, &domain.Photo{
 			SnapID:    snapID,
 			StoredKey: key,
+			Token:     token,
 		})
 		if err != nil {
 			rollback()
@@ -125,7 +128,8 @@ func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 		photos = append(photos, domain.Photo{
 			ID:        photoID,
 			SnapID:    snapID,
-			URL:       h.storage.URL(key),
+			Token:     token,
+			URL:       fmt.Sprintf("/photos/%s", token),
 			StoredKey: key,
 		})
 	}
@@ -136,6 +140,31 @@ func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 		Longitude: float64(req.Longitude),
 		Photos:    photos,
 	})
+}
+
+func (h *SnapHandler) ServePhoto(w http.ResponseWriter, r *http.Request) {
+	token := chi.URLParam(r, "token")
+	photo, err := h.repo.GetPhotoByToken(r.Context(), token)
+	if err != nil {
+		if err == domain.ErrNotFound {
+			http.NotFound(w, r)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "could not fetch photo")
+		return
+	}
+
+	rc, ct, err := h.storage.Get(r.Context(), photo.StoredKey)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not read photo")
+		return
+	}
+	defer rc.Close()
+
+	w.Header().Set("Content-Type", ct)
+	if _, err := io.Copy(w, rc); err != nil {
+		log.Printf("warning: failed to stream photo %q: %v", token, err)
+	}
 }
 
 func (h *SnapHandler) DeleteSnap(w http.ResponseWriter, r *http.Request) {
@@ -177,7 +206,7 @@ func (h *SnapHandler) ListSnaps(w http.ResponseWriter, r *http.Request) {
 	}
 	for i := range snaps {
 		for j := range snaps[i].Photos {
-			snaps[i].Photos[j].URL = h.storage.URL(snaps[i].Photos[j].StoredKey)
+			snaps[i].Photos[j].URL = fmt.Sprintf("/photos/%s", snaps[i].Photos[j].Token)
 		}
 	}
 	writeJSON(w, http.StatusOK, snaps)

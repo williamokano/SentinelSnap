@@ -40,8 +40,7 @@ func TestCreateSnap_LatLngAsStrings(t *testing.T) {
 	store := &storageMock.StorageProvider{}
 
 	repo.On("CreateSnap", mock.Anything, mock.Anything).Return(int64(1), nil)
-	store.On("Put", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", nil).Once()
-	store.On("URL", mock.Anything).Return("/uploads/snaps/1/abc.jpg").Once()
+	store.On("Put", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 	repo.On("AddPhoto", mock.Anything, mock.Anything).Return(int64(1), nil).Once()
 
 	body := postBodyRaw(map[string]any{
@@ -67,8 +66,7 @@ func TestCreateSnap_LatLngAsNumbers(t *testing.T) {
 	store := &storageMock.StorageProvider{}
 
 	repo.On("CreateSnap", mock.Anything, mock.Anything).Return(int64(1), nil)
-	store.On("Put", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", nil).Once()
-	store.On("URL", mock.Anything).Return("/uploads/snaps/1/abc.jpg").Once()
+	store.On("Put", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 	repo.On("AddPhoto", mock.Anything, mock.Anything).Return(int64(1), nil).Once()
 
 	body := postBodyRaw(map[string]any{
@@ -113,8 +111,7 @@ func TestCreateSnap_Success(t *testing.T) {
 	store := &storageMock.StorageProvider{}
 
 	repo.On("CreateSnap", mock.Anything, mock.Anything).Return(int64(7), nil)
-	store.On("Put", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", nil).Twice()
-	store.On("URL", mock.Anything).Return("/uploads/snaps/7/abc.jpg").Twice()
+	store.On("Put", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
 	repo.On("AddPhoto", mock.Anything, mock.Anything).Return(int64(1), nil).Once()
 	repo.On("AddPhoto", mock.Anything, mock.Anything).Return(int64(2), nil).Once()
 
@@ -128,7 +125,14 @@ func TestCreateSnap_Success(t *testing.T) {
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	assert.Equal(t, float64(7), resp["id"])
-	assert.Len(t, resp["photos"], 2)
+	photos := resp["photos"].([]any)
+	assert.Len(t, photos, 2)
+	for _, p := range photos {
+		photo := p.(map[string]any)
+		url, ok := photo["url"].(string)
+		assert.True(t, ok)
+		assert.Contains(t, url, "/photos/")
+	}
 
 	repo.AssertExpectations(t)
 	store.AssertExpectations(t)
@@ -167,10 +171,9 @@ func TestCreateSnap_StorageFailure_Rollback(t *testing.T) {
 	store := &storageMock.StorageProvider{}
 
 	repo.On("CreateSnap", mock.Anything, mock.Anything).Return(int64(7), nil)
-	store.On("Put", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", nil).Once()
-	store.On("URL", mock.Anything).Return("/uploads/snaps/7/abc.jpg").Once()
+	store.On("Put", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 	repo.On("AddPhoto", mock.Anything, mock.Anything).Return(int64(1), nil).Once()
-	store.On("Put", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", assert.AnError).Once()
+	store.On("Put", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(assert.AnError).Once()
 	store.On("Delete", mock.Anything, mock.Anything).Return(nil).Once()
 	repo.On("DeleteSnap", mock.Anything, int64(7)).Return(nil).Once()
 
@@ -209,11 +212,10 @@ func TestListSnaps_WithData(t *testing.T) {
 	snaps := []domain.Snap{
 		{
 			ID: 1, Latitude: 37.77, Longitude: -122.41,
-			Photos: []domain.Photo{{ID: 10, SnapID: 1, StoredKey: "snaps/1/p.jpg"}},
+			Photos: []domain.Photo{{ID: 10, SnapID: 1, Token: "abc123", StoredKey: "snaps/1/p.jpg"}},
 		},
 	}
 	repo.On("ListSnaps", mock.Anything).Return(snaps, nil)
-	store.On("URL", "snaps/1/p.jpg").Return("/uploads/snaps/1/p.jpg").Once()
 
 	req := httptest.NewRequest(http.MethodGet, "/snaps", nil)
 	w := httptest.NewRecorder()
@@ -225,5 +227,7 @@ func TestListSnaps_WithData(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Len(t, resp, 1)
 	assert.Equal(t, float64(1), resp[0]["id"])
-	assert.Len(t, resp[0]["photos"], 1)
+	photos := resp[0]["photos"].([]any)
+	assert.Len(t, photos, 1)
+	assert.Equal(t, "/photos/abc123", photos[0].(map[string]any)["url"])
 }
