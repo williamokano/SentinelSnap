@@ -49,6 +49,30 @@
     const entries = new Map();
     const clusterGroup = L.markerClusterGroup();
 
+    // Track which markers are in the currently spiderfied cluster so we can
+    // re-spiderfy after addLayer/removeLayer collapses it.
+    let spiderfiedMarkers = null;
+    clusterGroup.on('spiderfied',   e => { spiderfiedMarkers = e.markers.slice(); });
+    clusterGroup.on('unspiderfied', ()  => { spiderfiedMarkers = null; });
+
+    function withSpiderfyPreserved(fn) {
+      const saved = spiderfiedMarkers ? spiderfiedMarkers.slice() : null;
+      fn();
+      if (!saved) return;
+      // addLayer/removeLayer unspiderfies synchronously; re-spiderfy on next tick
+      // after markercluster has finished re-clustering.
+      setTimeout(() => {
+        for (const m of saved) {
+          if (!clusterGroup.hasLayer(m)) continue;
+          const parent = clusterGroup.getVisibleParent(m);
+          if (parent && typeof parent.spiderfy === 'function') {
+            parent.spiderfy();
+            return;
+          }
+        }
+      }, 0);
+    }
+
     const map = L.map('map').setView([20, 0], 2);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -149,8 +173,8 @@
       const latlng = [snap.latitude, snap.longitude];
       const marker = L.marker(latlng);
       marker.bindPopup(buildPopup(snap), { maxWidth: 320 });
-      clusterGroup.addLayer(marker);
       entries.set(snap.id, { marker, snap });
+      withSpiderfyPreserved(() => clusterGroup.addLayer(marker));
     }
 
     function updateSnapMarker(id, name) {
@@ -203,7 +227,9 @@
       es.addEventListener('snap_deleted', e => {
         const { id } = JSON.parse(e.data);
         const entry = entries.get(id);
-        if (entry) { clusterGroup.removeLayer(entry.marker); entries.delete(id); }
+        if (entry) {
+          withSpiderfyPreserved(() => { clusterGroup.removeLayer(entry.marker); entries.delete(id); });
+        }
         showToast(`Snap #${id} deleted`, 'danger');
       });
 
