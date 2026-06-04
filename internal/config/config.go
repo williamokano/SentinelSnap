@@ -27,8 +27,8 @@ type Config struct {
 }
 
 func Load() (*Config, error) {
-	// Load .env if present; ignore error when file doesn't exist (e.g. in Docker)
-	_ = godotenv.Load()
+	// Load env file; ENV_FILE overrides the default ".env"
+	_ = godotenv.Load(getEnv("ENV_FILE", ".env"))
 
 	port, _ := strconv.Atoi(getEnv("HTTP_PORT", "8080"))
 	dsn := os.Getenv("DB_DSN")
