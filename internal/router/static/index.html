@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SentinelSnap</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; display: flex; flex-direction: column; height: 100vh; }
+    header { background: #1a1a2e; color: #e0e0e0; padding: 12px 20px; font-size: 1.1rem; font-weight: 600; letter-spacing: 0.05em; }
+    #map { flex: 1; }
+    .popup-photos { display: flex; flex-wrap: wrap; gap: 6px; max-width: 280px; margin-top: 8px; }
+    .popup-photos img { width: 80px; height: 80px; object-fit: cover; border-radius: 4px; cursor: pointer; }
+    .popup-meta { font-size: 0.8rem; color: #666; margin-top: 4px; }
+    #lightbox { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 9999; align-items: center; justify-content: center; }
+    #lightbox.open { display: flex; }
+    #lightbox img { max-width: 90vw; max-height: 90vh; border-radius: 8px; box-shadow: 0 4px 32px rgba(0,0,0,0.6); }
+    #lightbox-close { position: absolute; top: 20px; right: 28px; color: #fff; font-size: 2rem; cursor: pointer; line-height: 1; }
+  </style>
+</head>
+<body>
+  <header>SentinelSnap</header>
+  <div id="map"></div>
+
+  <div id="lightbox">
+    <span id="lightbox-close">&times;</span>
+    <img id="lightbox-img" src="" alt="" />
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const map = L.map('map').setView([20, 0], 2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+
+    const lightbox = document.getElementById('lightbox');
+    const lightboxImg = document.getElementById('lightbox-img');
+    document.getElementById('lightbox-close').onclick = () => lightbox.classList.remove('open');
+    lightbox.onclick = (e) => { if (e.target === lightbox) lightbox.classList.remove('open'); };
+
+    function openLightbox(url) {
+      lightboxImg.src = url;
+      lightbox.classList.add('open');
+    }
+
+    function formatDate(iso) {
+      return new Date(iso).toLocaleString();
+    }
+
+    async function loadSnaps() {
+      let snaps;
+      try {
+        const res = await fetch('/snaps');
+        snaps = await res.json();
+      } catch (e) {
+        console.error('Failed to load snaps', e);
+        return;
+      }
+
+      if (!snaps || snaps.length === 0) return;
+
+      const bounds = [];
+      snaps.forEach(snap => {
+        const latlng = [snap.latitude, snap.longitude];
+        bounds.push(latlng);
+
+        const photosHtml = (snap.photos || []).map(p =>
+          `<img src="${p.url}" alt="photo" data-url="${p.url}" />`
+        ).join('');
+
+        const popupHtml = `
+          <strong>Snap #${snap.id}</strong>
+          <div class="popup-meta">${formatDate(snap.created_at)}<br/>${snap.latitude.toFixed(5)}, ${snap.longitude.toFixed(5)}</div>
+          <div class="popup-photos">${photosHtml || '<em>No photos</em>'}</div>
+        `;
+
+        const marker = L.marker(latlng).addTo(map);
+        marker.bindPopup(popupHtml, { maxWidth: 320 });
+        marker.on('popupopen', () => {
+          document.querySelectorAll('.popup-photos img').forEach(img => {
+            img.onclick = () => openLightbox(img.dataset.url);
+          });
+        });
+      });
+
+      if (bounds.length > 0) {
+        map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+      }
+    }
+
+    loadSnaps();
+  </script>
+</body>
+</html>
