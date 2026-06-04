@@ -15,6 +15,9 @@
     .popup-photos { display: flex; flex-wrap: wrap; gap: 6px; max-width: 280px; margin-top: 8px; }
     .popup-photos img { width: 80px; height: 80px; object-fit: cover; border-radius: 4px; cursor: pointer; }
     .popup-meta { font-size: 0.8rem; color: #666; margin-top: 4px; }
+    .popup-title { font-weight: 600; cursor: text; display: inline-block; }
+    .popup-title:hover { text-decoration: underline dotted; }
+    .name-input { font-size: 0.95rem; font-weight: 600; border: 1px solid #aaa; border-radius: 3px; padding: 1px 4px; width: 100%; max-width: 220px; }
     #lightbox { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 9999; align-items: center; justify-content: center; }
     #lightbox.open { display: flex; }
     #lightbox img { max-width: 90vw; max-height: 90vh; border-radius: 8px; box-shadow: 0 4px 32px rgba(0,0,0,0.6); }
@@ -25,6 +28,7 @@
     .toast { background: #1a1a2e; color: #e0e0e0; padding: 10px 16px; border-radius: 6px; font-size: 0.85rem; box-shadow: 0 2px 12px rgba(0,0,0,0.4); opacity: 0; transform: translateY(8px); transition: opacity 0.25s, transform 0.25s; }
     .toast.show { opacity: 1; transform: translateY(0); }
     .toast.toast-danger { background: #6b1a1a; }
+    .toast.toast-info { background: #1a3a6b; }
   </style>
 </head>
 <body>
@@ -39,7 +43,8 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
   <script>
-    const markers = new Map();
+    // markers stores { marker, snap } keyed by snap id
+    const entries = new Map();
     const clusterGroup = L.markerClusterGroup();
 
     const map = L.map('map').setView([20, 0], 2);
@@ -57,10 +62,10 @@
       lightbox.classList.add('open');
     }
 
-    function showToast(msg, danger = false) {
+    function showToast(msg, variant = '') {
       const container = document.getElementById('toast-container');
       const el = document.createElement('div');
-      el.className = 'toast' + (danger ? ' toast-danger' : '');
+      el.className = 'toast' + (variant ? ' toast-' + variant : '');
       el.textContent = msg;
       container.appendChild(el);
       requestAnimationFrame(() => { requestAnimationFrame(() => el.classList.add('show')); });
@@ -70,38 +75,84 @@
       }, 3500);
     }
 
+    function snapLabel(snap) {
+      return snap.name || ('Snap #' + snap.id);
+    }
+
     function buildPopup(snap) {
       const photosHtml = (snap.photos || []).map(p =>
         `<img src="${p.url}" alt="photo" onclick="openLightbox(this.src)" />`
       ).join('');
       return `
-        <strong>Snap #${snap.id}</strong>
+        <span class="popup-title" title="Click to rename" onclick="startRename(this, ${snap.id})">${snapLabel(snap)}</span>
         <div class="popup-meta">${formatDate(snap.created_at)}<br/>${snap.latitude.toFixed(5)}, ${snap.longitude.toFixed(5)}</div>
         <div class="popup-photos">${photosHtml || '<em>No photos</em>'}</div>
         <button class="btn-delete" onclick="deleteSnap(${snap.id})">Delete</button>
       `;
     }
 
-    function addSnapMarker(snap) {
-      if (markers.has(snap.id)) return;
-      const latlng = [snap.latitude, snap.longitude];
-      const marker = L.marker(latlng);
-      marker.bindPopup(buildPopup(snap), { maxWidth: 320 });
-      clusterGroup.addLayer(marker);
-      markers.set(snap.id, marker);
+    function startRename(el, id) {
+      const entry = entries.get(id);
+      if (!entry) return;
+      const current = entry.snap.name || '';
+      const input = document.createElement('input');
+      input.className = 'name-input';
+      input.value = current;
+      input.maxLength = 100;
+      input.placeholder = 'Snap #' + id;
+      el.replaceWith(input);
+      input.focus();
+      input.select();
+
+      let saved = false;
+      async function save() {
+        if (saved) return;
+        saved = true;
+        const name = input.value.trim();
+        if (name === current) {
+          input.replaceWith(el);
+          return;
+        }
+        await fetch(`/snaps/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name }),
+        });
+        // SSE snap_updated will update the popup for everyone
+      }
+
+      input.addEventListener('blur', save);
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        if (e.key === 'Escape') { saved = true; input.replaceWith(el); }
+      });
     }
 
     async function deleteSnap(id) {
-      if (!confirm(`Delete snap #${id}? This cannot be undone.`)) return;
+      if (!confirm(`Delete "${snapLabel(entries.get(id)?.snap)}"? This cannot be undone.`)) return;
       const res = await fetch(`/snaps/${id}`, { method: 'DELETE' });
-      if (!res.ok) {
-        alert('Failed to delete snap.');
-      }
-      // marker and toast are handled via SSE snap_deleted event
+      if (!res.ok) alert('Failed to delete snap.');
+      // SSE snap_deleted handles marker removal and toast for everyone
     }
 
     function formatDate(iso) {
       return new Date(iso).toLocaleString();
+    }
+
+    function addSnapMarker(snap) {
+      if (entries.has(snap.id)) return;
+      const latlng = [snap.latitude, snap.longitude];
+      const marker = L.marker(latlng);
+      marker.bindPopup(buildPopup(snap), { maxWidth: 320 });
+      clusterGroup.addLayer(marker);
+      entries.set(snap.id, { marker, snap });
+    }
+
+    function updateSnapMarker(id, name) {
+      const entry = entries.get(id);
+      if (!entry) return;
+      entry.snap.name = name;
+      entry.marker.setPopupContent(buildPopup(entry.snap));
     }
 
     async function loadSnaps() {
@@ -135,18 +186,24 @@
         const snap = JSON.parse(e.data);
         addSnapMarker(snap);
         map.addLayer(clusterGroup);
-        showToast(`New snap #${snap.id} received`);
+        showToast(`New snap received: ${snapLabel(snap)}`);
+      });
+
+      es.addEventListener('snap_updated', e => {
+        const { id, name } = JSON.parse(e.data);
+        updateSnapMarker(id, name);
+        showToast(`Snap renamed: ${name || 'Snap #' + id}`, 'info');
       });
 
       es.addEventListener('snap_deleted', e => {
         const { id } = JSON.parse(e.data);
-        const m = markers.get(id);
-        if (m) { clusterGroup.removeLayer(m); markers.delete(id); }
-        showToast(`Snap #${id} deleted`, true);
+        const entry = entries.get(id);
+        if (entry) { clusterGroup.removeLayer(entry.marker); entries.delete(id); }
+        showToast(`Snap #${id} deleted`, 'danger');
       });
 
       es.onerror = () => {
-        // browser auto-reconnects; no extra handling needed
+        // browser auto-reconnects
       };
     }
 

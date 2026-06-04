@@ -142,7 +142,7 @@ func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 		Longitude: float64(req.Longitude),
 		Photos:    photos,
 	}
-	h.hub.Broadcast("snap", snap)
+	h.hub.Broadcast(hub.EventSnapCreated, snap)
 	writeJSON(w, http.StatusCreated, snap)
 }
 
@@ -169,6 +169,38 @@ func (h *SnapHandler) ServePhoto(w http.ResponseWriter, r *http.Request) {
 	if _, err := io.Copy(w, rc); err != nil {
 		log.Printf("warning: failed to stream photo %q: %v", token, err)
 	}
+}
+
+func (h *SnapHandler) UpdateSnap(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid snap id")
+		return
+	}
+
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if len(req.Name) > 100 {
+		writeError(w, http.StatusBadRequest, "name must be 100 characters or fewer")
+		return
+	}
+
+	if err := h.repo.UpdateSnapName(r.Context(), id, req.Name); err != nil {
+		if err == domain.ErrNotFound {
+			writeError(w, http.StatusNotFound, "snap not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "could not update snap")
+		return
+	}
+
+	h.hub.Broadcast(hub.EventSnapUpdated, map[string]any{"id": id, "name": req.Name})
+	writeJSON(w, http.StatusOK, map[string]any{"id": id, "name": req.Name})
 }
 
 func (h *SnapHandler) DeleteSnap(w http.ResponseWriter, r *http.Request) {
@@ -199,7 +231,7 @@ func (h *SnapHandler) DeleteSnap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.hub.Broadcast("snap_deleted", map[string]int64{"id": id})
+	h.hub.Broadcast(hub.EventSnapDeleted, map[string]int64{"id": id})
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -25,6 +25,10 @@ func (m *SnapRepository) DeleteSnap(ctx context.Context, id int64) error {
 	return m.Called(ctx, id).Error(0)
 }
 
+func (m *SnapRepository) UpdateSnapName(ctx context.Context, id int64, name string) error {
+	return m.Called(ctx, id, name).Error(0)
+}
+
 func (m *SnapRepository) ListSnaps(ctx context.Context) ([]domain.Snap, error) {
 	args := m.Called(ctx)
 	return args.Get(0).([]domain.Snap), args.Error(1)

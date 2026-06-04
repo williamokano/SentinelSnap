@@ -9,6 +9,7 @@ var ErrNotFound = errors.New("not found")
 
 type Snap struct {
 	ID        int64     `db:"id"         json:"id"`
+	Name      string    `db:"name"       json:"name"`
 	Latitude  float64   `db:"latitude"   json:"latitude"`
 	Longitude float64   `db:"longitude"  json:"longitude"`
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
