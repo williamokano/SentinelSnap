@@ -24,7 +24,7 @@ func newHandler(repo *repoMock.SnapRepository, store *storageMock.StorageProvide
 
 func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
 
-func postBody(lat, lng float64, photos []map[string]string) []byte {
+func postBody(lat, lng float64, photos []string) []byte {
 	body := map[string]any{"latitude": lat, "longitude": lng, "photos": photos}
 	b, _ := json.Marshal(body)
 	return b
@@ -35,17 +35,12 @@ func TestCreateSnap_Success(t *testing.T) {
 	store := &storageMock.StorageProvider{}
 
 	repo.On("CreateSnap", mock.Anything, mock.Anything).Return(int64(7), nil)
-	store.On("Put", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-		Return("", nil).Twice()
-	store.On("URL", mock.Anything).Return("/uploads/snaps/7/a.jpg").Twice()
+	store.On("Put", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", nil).Twice()
+	store.On("URL", mock.Anything).Return("/uploads/snaps/7/abc.jpg").Twice()
 	repo.On("AddPhoto", mock.Anything, mock.Anything).Return(int64(1), nil).Once()
 	repo.On("AddPhoto", mock.Anything, mock.Anything).Return(int64(2), nil).Once()
 
-	photos := []map[string]string{
-		{"filename": "a.jpg", "content_type": "image/jpeg", "data": b64("imgdata1")},
-		{"filename": "b.jpg", "content_type": "image/jpeg", "data": b64("imgdata2")},
-	}
-	req := httptest.NewRequest(http.MethodPost, "/snaps", bytes.NewReader(postBody(37.77, -122.41, photos)))
+	req := httptest.NewRequest(http.MethodPost, "/snaps", bytes.NewReader(postBody(37.77, -122.41, []string{b64("imgdata1"), b64("imgdata2")})))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -65,8 +60,7 @@ func TestCreateSnap_MissingLatLng(t *testing.T) {
 	repo := &repoMock.SnapRepository{}
 	store := &storageMock.StorageProvider{}
 
-	photos := []map[string]string{{"filename": "a.jpg", "content_type": "image/jpeg", "data": b64("x")}}
-	req := httptest.NewRequest(http.MethodPost, "/snaps", bytes.NewReader(postBody(0, 0, photos)))
+	req := httptest.NewRequest(http.MethodPost, "/snaps", bytes.NewReader(postBody(0, 0, []string{b64("x")})))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -95,22 +89,14 @@ func TestCreateSnap_StorageFailure_Rollback(t *testing.T) {
 	store := &storageMock.StorageProvider{}
 
 	repo.On("CreateSnap", mock.Anything, mock.Anything).Return(int64(7), nil)
-	// First photo succeeds, second fails.
-	store.On("Put", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-		Return("", nil).Once()
-	store.On("URL", mock.Anything).Return("/uploads/snaps/7/a.jpg").Once()
+	store.On("Put", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", nil).Once()
+	store.On("URL", mock.Anything).Return("/uploads/snaps/7/abc.jpg").Once()
 	repo.On("AddPhoto", mock.Anything, mock.Anything).Return(int64(1), nil).Once()
-	store.On("Put", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-		Return("", assert.AnError).Once()
-	// Rollback: delete first stored file and the snap row.
+	store.On("Put", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", assert.AnError).Once()
 	store.On("Delete", mock.Anything, mock.Anything).Return(nil).Once()
 	repo.On("DeleteSnap", mock.Anything, int64(7)).Return(nil).Once()
 
-	photos := []map[string]string{
-		{"filename": "a.jpg", "content_type": "image/jpeg", "data": b64("img1")},
-		{"filename": "b.jpg", "content_type": "image/jpeg", "data": b64("img2")},
-	}
-	req := httptest.NewRequest(http.MethodPost, "/snaps", bytes.NewReader(postBody(37.77, -122.41, photos)))
+	req := httptest.NewRequest(http.MethodPost, "/snaps", bytes.NewReader(postBody(37.77, -122.41, []string{b64("img1"), b64("img2")})))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -163,4 +149,3 @@ func TestListSnaps_WithData(t *testing.T) {
 	assert.Equal(t, float64(1), resp[0]["id"])
 	assert.Len(t, resp[0]["photos"], 1)
 }
-
