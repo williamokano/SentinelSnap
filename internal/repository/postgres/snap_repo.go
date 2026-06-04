@@ -33,8 +33,8 @@ func (r *snapRepository) CreateSnap(ctx context.Context, snap *domain.Snap) (int
 func (r *snapRepository) AddPhoto(ctx context.Context, photo *domain.Photo) (int64, error) {
 	var id int64
 	err := r.db.QueryRowContext(ctx,
-		`INSERT INTO photos (snap_id, stored_key) VALUES ($1, $2) RETURNING id`,
-		photo.SnapID, photo.StoredKey,
+		`INSERT INTO photos (snap_id, stored_key, token) VALUES ($1, $2, $3) RETURNING id`,
+		photo.SnapID, photo.StoredKey, photo.Token,
 	).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("add photo: %w", err)
@@ -61,7 +61,7 @@ func (r *snapRepository) ListSnaps(ctx context.Context) ([]domain.Snap, error) {
 		ids[i] = s.ID
 	}
 
-	query, args, err := sqlx.In(`SELECT id, snap_id, stored_key, created_at FROM photos WHERE snap_id IN (?) ORDER BY snap_id, id`, ids)
+	query, args, err := sqlx.In(`SELECT id, snap_id, stored_key, token, created_at FROM photos WHERE snap_id IN (?) ORDER BY snap_id, id`, ids)
 	if err != nil {
 		return nil, fmt.Errorf("build photos query: %w", err)
 	}
@@ -103,10 +103,24 @@ func (r *snapRepository) GetSnapByID(ctx context.Context, id int64) (*domain.Sna
 	return &snap, nil
 }
 
+func (r *snapRepository) GetPhotoByToken(ctx context.Context, token string) (*domain.Photo, error) {
+	var photo domain.Photo
+	err := r.db.GetContext(ctx, &photo,
+		`SELECT id, snap_id, stored_key, token, created_at FROM photos WHERE token = $1`, token,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, domain.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get photo by token: %w", err)
+	}
+	return &photo, nil
+}
+
 func (r *snapRepository) ListPhotosForSnap(ctx context.Context, snapID int64) ([]domain.Photo, error) {
 	var photos []domain.Photo
 	if err := r.db.SelectContext(ctx, &photos,
-		`SELECT id, snap_id, stored_key, created_at FROM photos WHERE snap_id = $1 ORDER BY id`, snapID,
+		`SELECT id, snap_id, stored_key, token, created_at FROM photos WHERE snap_id = $1 ORDER BY id`, snapID,
 	); err != nil {
 		return nil, fmt.Errorf("list photos for snap %d: %w", snapID, err)
 	}

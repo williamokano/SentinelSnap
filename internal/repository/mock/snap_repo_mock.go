@@ -38,6 +38,14 @@ func (m *SnapRepository) GetSnapByID(ctx context.Context, id int64) (*domain.Sna
 	return args.Get(0).(*domain.Snap), args.Error(1)
 }
 
+func (m *SnapRepository) GetPhotoByToken(ctx context.Context, token string) (*domain.Photo, error) {
+	args := m.Called(ctx, token)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.Photo), args.Error(1)
+}
+
 func (m *SnapRepository) ListPhotosForSnap(ctx context.Context, snapID int64) ([]domain.Photo, error) {
 	args := m.Called(ctx, snapID)
 	return args.Get(0).([]domain.Photo), args.Error(1)

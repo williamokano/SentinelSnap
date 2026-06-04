@@ -2,6 +2,7 @@ package local_test
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,9 +18,8 @@ func TestPut_CreatesFile(t *testing.T) {
 	s, err := local.New(dir)
 	require.NoError(t, err)
 
-	url, err := s.Put(context.Background(), "test.jpg", strings.NewReader("imgdata"), "image/jpeg")
+	err = s.Put(context.Background(), "test.jpg", strings.NewReader("imgdata"), "image/jpeg")
 	require.NoError(t, err)
-	assert.Equal(t, "/uploads/test.jpg", url)
 
 	data, err := os.ReadFile(filepath.Join(dir, "test.jpg"))
 	require.NoError(t, err)
@@ -31,11 +31,29 @@ func TestPut_CreatesNestedDirs(t *testing.T) {
 	s, err := local.New(dir)
 	require.NoError(t, err)
 
-	_, err = s.Put(context.Background(), "snaps/7/photo.jpg", strings.NewReader("data"), "image/jpeg")
+	err = s.Put(context.Background(), "snaps/7/photo.jpg", strings.NewReader("data"), "image/jpeg")
 	require.NoError(t, err)
 
 	_, err = os.Stat(filepath.Join(dir, "snaps", "7", "photo.jpg"))
 	require.NoError(t, err)
+}
+
+func TestGet_ReturnsContent(t *testing.T) {
+	dir := t.TempDir()
+	s, err := local.New(dir)
+	require.NoError(t, err)
+
+	err = s.Put(context.Background(), "snap.jpg", strings.NewReader("imgdata"), "image/jpeg")
+	require.NoError(t, err)
+
+	rc, ct, err := s.Get(context.Background(), "snap.jpg")
+	require.NoError(t, err)
+	defer rc.Close()
+
+	assert.Equal(t, "image/jpeg", ct)
+	data, err := io.ReadAll(rc)
+	require.NoError(t, err)
+	assert.Equal(t, "imgdata", string(data))
 }
 
 func TestDelete_RemovesFile(t *testing.T) {
@@ -43,16 +61,11 @@ func TestDelete_RemovesFile(t *testing.T) {
 	s, err := local.New(dir)
 	require.NoError(t, err)
 
-	_, err = s.Put(context.Background(), "snap.jpg", strings.NewReader("x"), "image/jpeg")
+	err = s.Put(context.Background(), "snap.jpg", strings.NewReader("x"), "image/jpeg")
 	require.NoError(t, err)
 
 	require.NoError(t, s.Delete(context.Background(), "snap.jpg"))
 
 	_, err = os.Stat(filepath.Join(dir, "snap.jpg"))
 	assert.True(t, os.IsNotExist(err))
-}
-
-func TestURL_ReturnsRelativePath(t *testing.T) {
-	s, _ := local.New(t.TempDir())
-	assert.Equal(t, "/uploads/snaps/1/img.jpg", s.URL("snaps/1/img.jpg"))
 }
