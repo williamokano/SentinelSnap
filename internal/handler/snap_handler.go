@@ -3,13 +3,12 @@ package handler
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"path"
-	"strings"
-	"time"
 
 	"github.com/williamokano/sentinelsnap/internal/config"
 	"github.com/williamokano/sentinelsnap/internal/domain"
@@ -27,18 +26,10 @@ func NewSnapHandler(repo repository.SnapRepository, store storage.StorageProvide
 	return &SnapHandler{repo: repo, storage: store, cfg: cfg}
 }
 
-// createSnapRequest is the JSON body for POST /snaps.
 type createSnapRequest struct {
-	Latitude  float64       `json:"latitude"`
-	Longitude float64       `json:"longitude"`
-	Photos    []photoUpload `json:"photos"`
-}
-
-type photoUpload struct {
-	Filename    string `json:"filename"`
-	ContentType string `json:"content_type"`
-	// Data is the base64-encoded raw file content.
-	Data string `json:"data"`
+	Latitude  float64  `json:"latitude"`
+	Longitude float64  `json:"longitude"`
+	Photos    []string `json:"photos"`
 }
 
 func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
@@ -78,21 +69,16 @@ func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 		_ = h.repo.DeleteSnap(context.Background(), snapID)
 	}
 
-	for _, up := range req.Photos {
-		raw, err := base64.StdEncoding.DecodeString(up.Data)
+	for i, data := range req.Photos {
+		raw, err := base64.StdEncoding.DecodeString(data)
 		if err != nil {
 			rollback()
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid base64 for %q: %s", up.Filename, err))
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid base64 for photo %d: %s", i, err))
 			return
 		}
 
-		filename := sanitizeFilename(up.Filename)
-		key := fmt.Sprintf("snaps/%d/%d_%s", snapID, time.Now().UnixNano(), filename)
-
-		ct := up.ContentType
-		if ct == "" {
-			ct = "application/octet-stream"
-		}
+		ct := http.DetectContentType(raw)
+		key := fmt.Sprintf("snaps/%d/%s%s", snapID, randomID(), extForContentType(ct))
 
 		if _, err := h.storage.Put(ctx, key, bytes.NewReader(raw), ct); err != nil {
 			rollback()
@@ -119,13 +105,12 @@ func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	snap := domain.Snap{
+	writeJSON(w, http.StatusCreated, domain.Snap{
 		ID:        snapID,
 		Latitude:  req.Latitude,
 		Longitude: req.Longitude,
 		Photos:    photos,
-	}
-	writeJSON(w, http.StatusCreated, snap)
+	})
 }
 
 func (h *SnapHandler) ListSnaps(w http.ResponseWriter, r *http.Request) {
@@ -152,16 +137,23 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
-func sanitizeFilename(name string) string {
-	name = path.Base(name)
-	name = strings.Map(func(r rune) rune {
-		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '-' || r == '_' {
-			return r
-		}
-		return '_'
-	}, name)
-	if name == "" || name == "." {
-		return "upload"
+func randomID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+func extForContentType(ct string) string {
+	switch ct {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	default:
+		return ""
 	}
-	return name
 }
