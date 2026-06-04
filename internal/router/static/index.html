@@ -15,8 +15,10 @@
     .popup-photos { display: flex; flex-wrap: wrap; gap: 6px; max-width: 280px; margin-top: 8px; }
     .popup-photos img { width: 80px; height: 80px; object-fit: cover; border-radius: 4px; cursor: pointer; }
     .popup-meta { font-size: 0.8rem; color: #666; margin-top: 4px; }
-    .popup-title { font-weight: 600; cursor: text; display: inline-block; }
-    .popup-title:hover { text-decoration: underline dotted; }
+    .popup-title { font-weight: 600; }
+    .btn-edit { margin-top: 8px; padding: 4px 10px; background: #2471a3; color: #fff; border: none; border-radius: 4px; font-size: 0.75rem; cursor: pointer; }
+    .btn-edit:hover { background: #1a5276; }
+    .popup-actions { display: flex; gap: 6px; margin-top: 8px; }
     .name-input { font-size: 0.95rem; font-weight: 600; border: 1px solid #aaa; border-radius: 3px; padding: 1px 4px; width: 100%; max-width: 220px; }
     #lightbox { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 9999; align-items: center; justify-content: center; }
     #lightbox.open { display: flex; }
@@ -84,23 +86,28 @@
         `<img src="${p.url}" alt="photo" onclick="openLightbox(this.src)" />`
       ).join('');
       return `
-        <span class="popup-title" title="Click to rename" onclick="startRename(this, ${snap.id})">${snapLabel(snap)}</span>
+        <span class="popup-title" id="snap-title-${snap.id}">${snapLabel(snap)}</span>
         <div class="popup-meta">${formatDate(snap.created_at)}<br/>${snap.latitude.toFixed(5)}, ${snap.longitude.toFixed(5)}</div>
         <div class="popup-photos">${photosHtml || '<em>No photos</em>'}</div>
-        <button class="btn-delete" onclick="deleteSnap(${snap.id})">Delete</button>
+        <div class="popup-actions">
+          <button class="btn-edit" onclick="event.stopPropagation(); startRename(${snap.id})">Edit</button>
+          <button class="btn-delete" onclick="deleteSnap(${snap.id})">Delete</button>
+        </div>
       `;
     }
 
-    function startRename(el, id) {
+    function startRename(id) {
       const entry = entries.get(id);
       if (!entry) return;
+      const titleEl = document.getElementById('snap-title-' + id);
+      if (!titleEl) return;
       const current = entry.snap.name || '';
       const input = document.createElement('input');
       input.className = 'name-input';
       input.value = current;
       input.maxLength = 100;
       input.placeholder = 'Snap #' + id;
-      el.replaceWith(input);
+      titleEl.replaceWith(input);
       input.focus();
       input.select();
 
@@ -109,10 +116,8 @@
         if (saved) return;
         saved = true;
         const name = input.value.trim();
-        if (name === current) {
-          input.replaceWith(el);
-          return;
-        }
+        input.replaceWith(titleEl);
+        if (name === current) return;
         await fetch(`/snaps/${id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -124,7 +129,7 @@
       input.addEventListener('blur', save);
       input.addEventListener('keydown', e => {
         if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
-        if (e.key === 'Escape') { saved = true; input.replaceWith(el); }
+        if (e.key === 'Escape') { saved = true; input.replaceWith(titleEl); }
       });
     }
 
