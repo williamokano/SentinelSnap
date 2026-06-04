@@ -7,6 +7,12 @@ import (
 	"sync"
 )
 
+const (
+	EventSnapCreated = "snap"
+	EventSnapUpdated = "snap_updated"
+	EventSnapDeleted = "snap_deleted"
+)
+
 type Hub struct {
 	mu      sync.Mutex
 	clients map[chan []byte]struct{}

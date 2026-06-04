@@ -6,15 +6,18 @@ A self-hosted security snap service. Snap photos with GPS coordinates from your 
 
 ```
 Phone (iOS Shortcut / Android Tasker)
-  └─ Takes 2 photos
+  └─ Takes 2 photos (base64-encoded)
   └─ Reads GPS coordinates
   └─ POST /snaps  ──────────────────►  SentinelSnap server
-                                             └─ Stores photos
-                                             └─ Saves lat/lng + timestamp
-                                             └─ Shows pins on map UI
+                                             └─ Stores photos on disk
+                                             └─ Saves lat/lng + timestamp in DB
+                                             └─ Pushes SSE event to all browsers
+                                                   └─ Pin appears on map instantly
 ```
 
-You open the map on any browser and see every snap pinned at its exact location.
+Open the map on any browser and see every snap pinned at its exact location — live, no refresh needed. Multiple browser tabs stay in sync via [Server-Sent Events](docs/realtime.md).
+
+See [docs/](docs/) for detailed flow documentation.
 
 ---
 
@@ -111,6 +114,7 @@ All variables can be set in a `.env` file (loaded automatically at startup) or p
 | `STORAGE_BACKEND` | `local` | Storage backend (`local`) |
 | `LOCAL_UPLOAD_DIR` | `./uploads` | Directory where photos are saved |
 | `ENV_FILE` | `.env` | Path to the env file to load |
+| `DEBUG` | `false` | Log full request bodies |
 
 S3 support (`S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`) is wired in the config but not yet implemented in the storage layer.
 
@@ -135,13 +139,14 @@ Create a new snap with one or more photos.
 }
 ```
 
-`photos` is a plain array of base64-encoded image bytes. The server detects the content type automatically (JPEG, PNG, GIF, WebP) and generates a random filename — no metadata needed from the client.
+`photos` is a plain array of base64-encoded image bytes. The server detects the content type automatically (JPEG, PNG, GIF, WebP) and generates a random filename — no metadata needed from the client. `latitude` and `longitude` accept both numbers and strings (iOS Shortcuts sends strings).
 
 **Response `201`:**
 
 ```json
 {
   "id": 1,
+  "name": "",
   "latitude": 37.7749,
   "longitude": -122.4194,
   "created_at": "2024-01-01T12:00:00Z",
@@ -149,21 +154,62 @@ Create a new snap with one or more photos.
     {
       "id": 1,
       "snap_id": 1,
-      "url": "http://localhost:8080/uploads/snaps/1/photo.jpg",
-      "stored_key": "snaps/1/photo.jpg",
+      "url": "/photos/<random-token>",
       "created_at": "2024-01-01T12:00:00Z"
     }
   ]
 }
 ```
 
+Also broadcasts a `snap` SSE event to all connected browsers.
+
+---
+
 ### `GET /snaps`
 
-List all snaps with their photos.
+List all snaps with their photos, newest first.
 
-### `GET /uploads/*`
+---
 
-Serves uploaded photos (only when `STORAGE_BACKEND=local`).
+### `PATCH /snaps/{id}`
+
+Rename a snap (max 100 characters). Empty string clears the name back to the default "Snap #N" display.
+
+**Request body:**
+
+```json
+{ "name": "Front door" }
+```
+
+**Response `200`:**
+
+```json
+{ "id": 1, "name": "Front door" }
+```
+
+Also broadcasts a `snap_updated` SSE event to all connected browsers.
+
+---
+
+### `DELETE /snaps/{id}`
+
+Delete a snap and all its photos from storage and the database.
+
+**Response `204` No Content.**
+
+Also broadcasts a `snap_deleted` SSE event to all connected browsers.
+
+---
+
+### `GET /photos/{token}`
+
+Stream a photo by its random token. Tokens are generated at upload time and stored in the database — they are not derivable from any other ID or path, preventing enumeration.
+
+---
+
+### `GET /events`
+
+Server-Sent Events stream. The browser connects once on page load and receives push notifications for all snap activity. See [docs/realtime.md](docs/realtime.md) for the full event reference.
 
 ---
 
@@ -202,7 +248,6 @@ docker run -d \
   -e DB_DSN="postgres://user:pass@host:5432/sentinelsnap?sslmode=disable" \
   -e STORAGE_BACKEND=local \
   -e LOCAL_UPLOAD_DIR=/app/uploads \
-  -e LOCAL_BASE_URL=http://localhost:8080/uploads \
   -v ./uploads:/app/uploads \
   <your-dockerhub-username>/sentinelsnap:latest
 ```

@@ -29,6 +29,7 @@ func New(cfg *config.Config, h *handler.SnapHandler, ev *hub.Hub) http.Handler {
 
 	r.Post("/snaps", h.CreateSnap)
 	r.Get("/snaps", h.ListSnaps)
+	r.Patch("/snaps/{id}", h.UpdateSnap)
 	r.Delete("/snaps/{id}", h.DeleteSnap)
 	r.Get("/photos/{token}", h.ServePhoto)
 	r.Get("/events", ev.ServeSSE)

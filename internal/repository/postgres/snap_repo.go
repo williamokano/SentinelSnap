@@ -47,9 +47,23 @@ func (r *snapRepository) DeleteSnap(ctx context.Context, id int64) error {
 	return err
 }
 
+func (r *snapRepository) UpdateSnapName(ctx context.Context, id int64, name string) error {
+	res, err := r.db.ExecContext(ctx, `UPDATE snaps SET name = $2 WHERE id = $1`, id, name)
+	if err != nil {
+		return fmt.Errorf("update snap name: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
 func (r *snapRepository) ListSnaps(ctx context.Context) ([]domain.Snap, error) {
 	var snaps []domain.Snap
-	if err := r.db.SelectContext(ctx, &snaps, `SELECT id, latitude, longitude, created_at FROM snaps ORDER BY created_at DESC`); err != nil {
+	if err := r.db.SelectContext(ctx, &snaps,
+		`SELECT id, COALESCE(name, '') AS name, latitude, longitude, created_at FROM snaps ORDER BY created_at DESC`,
+	); err != nil {
 		return nil, fmt.Errorf("list snaps: %w", err)
 	}
 	if len(snaps) == 0 {
@@ -88,7 +102,9 @@ func (r *snapRepository) ListSnaps(ctx context.Context) ([]domain.Snap, error) {
 
 func (r *snapRepository) GetSnapByID(ctx context.Context, id int64) (*domain.Snap, error) {
 	var snap domain.Snap
-	err := r.db.GetContext(ctx, &snap, `SELECT id, latitude, longitude, created_at FROM snaps WHERE id = $1`, id)
+	err := r.db.GetContext(ctx, &snap,
+		`SELECT id, COALESCE(name, '') AS name, latitude, longitude, created_at FROM snaps WHERE id = $1`, id,
+	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, domain.ErrNotFound
 	}
