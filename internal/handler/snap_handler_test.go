@@ -14,12 +14,13 @@ import (
 	"github.com/williamokano/sentinelsnap/internal/config"
 	"github.com/williamokano/sentinelsnap/internal/domain"
 	"github.com/williamokano/sentinelsnap/internal/handler"
+	"github.com/williamokano/sentinelsnap/internal/hub"
 	repoMock "github.com/williamokano/sentinelsnap/internal/repository/mock"
 	storageMock "github.com/williamokano/sentinelsnap/internal/storage/mock"
 )
 
 func newHandler(repo *repoMock.SnapRepository, store *storageMock.StorageProvider) *handler.SnapHandler {
-	return handler.NewSnapHandler(repo, store, &config.Config{})
+	return handler.NewSnapHandler(repo, store, hub.New(), &config.Config{})
 }
 
 func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }

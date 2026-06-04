@@ -21,16 +21,20 @@
     #lightbox-close { position: absolute; top: 20px; right: 28px; color: #fff; font-size: 2rem; cursor: pointer; line-height: 1; }
     .btn-delete { margin-top: 8px; padding: 4px 10px; background: #c0392b; color: #fff; border: none; border-radius: 4px; font-size: 0.75rem; cursor: pointer; }
     .btn-delete:hover { background: #a93226; }
+    #toast-container { position: fixed; bottom: 24px; right: 24px; display: flex; flex-direction: column; gap: 8px; z-index: 10000; pointer-events: none; }
+    .toast { background: #1a1a2e; color: #e0e0e0; padding: 10px 16px; border-radius: 6px; font-size: 0.85rem; box-shadow: 0 2px 12px rgba(0,0,0,0.4); opacity: 0; transform: translateY(8px); transition: opacity 0.25s, transform 0.25s; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.toast-danger { background: #6b1a1a; }
   </style>
 </head>
 <body>
   <header>SentinelSnap</header>
   <div id="map"></div>
-
   <div id="lightbox">
     <span id="lightbox-close">&times;</span>
     <img id="lightbox-img" src="" alt="" />
   </div>
+  <div id="toast-container"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
@@ -53,15 +57,47 @@
       lightbox.classList.add('open');
     }
 
+    function showToast(msg, danger = false) {
+      const container = document.getElementById('toast-container');
+      const el = document.createElement('div');
+      el.className = 'toast' + (danger ? ' toast-danger' : '');
+      el.textContent = msg;
+      container.appendChild(el);
+      requestAnimationFrame(() => { requestAnimationFrame(() => el.classList.add('show')); });
+      setTimeout(() => {
+        el.classList.remove('show');
+        el.addEventListener('transitionend', () => el.remove(), { once: true });
+      }, 3500);
+    }
+
+    function buildPopup(snap) {
+      const photosHtml = (snap.photos || []).map(p =>
+        `<img src="${p.url}" alt="photo" onclick="openLightbox(this.src)" />`
+      ).join('');
+      return `
+        <strong>Snap #${snap.id}</strong>
+        <div class="popup-meta">${formatDate(snap.created_at)}<br/>${snap.latitude.toFixed(5)}, ${snap.longitude.toFixed(5)}</div>
+        <div class="popup-photos">${photosHtml || '<em>No photos</em>'}</div>
+        <button class="btn-delete" onclick="deleteSnap(${snap.id})">Delete</button>
+      `;
+    }
+
+    function addSnapMarker(snap) {
+      if (markers.has(snap.id)) return;
+      const latlng = [snap.latitude, snap.longitude];
+      const marker = L.marker(latlng);
+      marker.bindPopup(buildPopup(snap), { maxWidth: 320 });
+      clusterGroup.addLayer(marker);
+      markers.set(snap.id, marker);
+    }
+
     async function deleteSnap(id) {
       if (!confirm(`Delete snap #${id}? This cannot be undone.`)) return;
       const res = await fetch(`/snaps/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        const m = markers.get(id);
-        if (m) { clusterGroup.removeLayer(m); markers.delete(id); }
-      } else {
+      if (!res.ok) {
         alert('Failed to delete snap.');
       }
+      // marker and toast are handled via SSE snap_deleted event
     }
 
     function formatDate(iso) {
@@ -82,24 +118,8 @@
 
       const bounds = [];
       snaps.forEach(snap => {
-        const latlng = [snap.latitude, snap.longitude];
-        bounds.push(latlng);
-
-        const photosHtml = (snap.photos || []).map(p =>
-          `<img src="${p.url}" alt="photo" onclick="openLightbox(this.src)" />`
-        ).join('');
-
-        const popupHtml = `
-          <strong>Snap #${snap.id}</strong>
-          <div class="popup-meta">${formatDate(snap.created_at)}<br/>${snap.latitude.toFixed(5)}, ${snap.longitude.toFixed(5)}</div>
-          <div class="popup-photos">${photosHtml || '<em>No photos</em>'}</div>
-          <button class="btn-delete" onclick="deleteSnap(${snap.id})">Delete</button>
-        `;
-
-        const marker = L.marker(latlng);
-        marker.bindPopup(popupHtml, { maxWidth: 320 });
-        clusterGroup.addLayer(marker);
-        markers.set(snap.id, marker);
+        addSnapMarker(snap);
+        bounds.push([snap.latitude, snap.longitude]);
       });
 
       map.addLayer(clusterGroup);
@@ -108,7 +128,30 @@
       }
     }
 
+    function connectEvents() {
+      const es = new EventSource('/events');
+
+      es.addEventListener('snap', e => {
+        const snap = JSON.parse(e.data);
+        addSnapMarker(snap);
+        map.addLayer(clusterGroup);
+        showToast(`New snap #${snap.id} received`);
+      });
+
+      es.addEventListener('snap_deleted', e => {
+        const { id } = JSON.parse(e.data);
+        const m = markers.get(id);
+        if (m) { clusterGroup.removeLayer(m); markers.delete(id); }
+        showToast(`Snap #${id} deleted`, true);
+      });
+
+      es.onerror = () => {
+        // browser auto-reconnects; no extra handling needed
+      };
+    }
+
     loadSnaps();
+    connectEvents();
   </script>
 </body>
 </html>
