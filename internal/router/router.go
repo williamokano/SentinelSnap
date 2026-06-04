@@ -28,6 +28,7 @@ func New(cfg *config.Config, h *handler.SnapHandler) http.Handler {
 
 	r.Post("/snaps", h.CreateSnap)
 	r.Get("/snaps", h.ListSnaps)
+	r.Delete("/snaps/{id}", h.DeleteSnap)
 
 	if cfg.StorageBackend == "local" {
 		fileServer := http.FileServer(http.Dir(cfg.LocalUploadDir))

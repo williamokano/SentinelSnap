@@ -17,6 +17,8 @@
     #lightbox.open { display: flex; }
     #lightbox img { max-width: 90vw; max-height: 90vh; border-radius: 8px; box-shadow: 0 4px 32px rgba(0,0,0,0.6); }
     #lightbox-close { position: absolute; top: 20px; right: 28px; color: #fff; font-size: 2rem; cursor: pointer; line-height: 1; }
+    .btn-delete { margin-top: 8px; padding: 4px 10px; background: #c0392b; color: #fff; border: none; border-radius: 4px; font-size: 0.75rem; cursor: pointer; }
+    .btn-delete:hover { background: #a93226; }
   </style>
 </head>
 <body>
@@ -30,6 +32,8 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
+    const markers = new Map();
+
     const map = L.map('map').setView([20, 0], 2);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -43,6 +47,17 @@
     function openLightbox(url) {
       lightboxImg.src = url;
       lightbox.classList.add('open');
+    }
+
+    async function deleteSnap(id) {
+      if (!confirm(`Delete snap #${id}? This cannot be undone.`)) return;
+      const res = await fetch(`/snaps/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        markers.get(id)?.remove();
+        markers.delete(id);
+      } else {
+        alert('Failed to delete snap.');
+      }
     }
 
     function formatDate(iso) {
@@ -74,10 +89,12 @@
           <strong>Snap #${snap.id}</strong>
           <div class="popup-meta">${formatDate(snap.created_at)}<br/>${snap.latitude.toFixed(5)}, ${snap.longitude.toFixed(5)}</div>
           <div class="popup-photos">${photosHtml || '<em>No photos</em>'}</div>
+          <button class="btn-delete" onclick="deleteSnap(${snap.id})">Delete</button>
         `;
 
         const marker = L.marker(latlng).addTo(map);
         marker.bindPopup(popupHtml, { maxWidth: 320 });
+        markers.set(snap.id, marker);
       });
 
       if (bounds.length > 0) {
