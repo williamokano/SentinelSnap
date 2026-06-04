@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sentinelsnap}
+      POSTGRES_USER: ${POSTGRES_USER:-sentinel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sentinel} -d ${POSTGRES_DB:-sentinelsnap}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    image: ${DOCKER_USERNAME:-williamokano}/sentinelsnap:${APP_VERSION:-latest}
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-8080}:8080"
+    environment:
+      DB_DSN: postgres://${POSTGRES_USER:-sentinel}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-sentinelsnap}?sslmode=disable
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      LOCAL_UPLOAD_DIR: /app/uploads
+      LOCAL_BASE_URL: ${LOCAL_BASE_URL:-http://localhost:8080/uploads}
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  uploads:
