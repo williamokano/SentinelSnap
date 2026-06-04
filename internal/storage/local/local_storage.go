@@ -36,7 +36,12 @@ func (s *LocalStorage) Put(_ context.Context, key string, r io.Reader, _ string)
 }
 
 func (s *LocalStorage) Delete(_ context.Context, key string) error {
-	return os.Remove(filepath.Join(s.baseDir, filepath.FromSlash(key)))
+	dest := filepath.Join(s.baseDir, filepath.FromSlash(key))
+	if err := os.Remove(dest); err != nil {
+		return err
+	}
+	_ = os.Remove(filepath.Dir(dest))
+	return nil
 }
 
 func (s *LocalStorage) URL(key string) string {
