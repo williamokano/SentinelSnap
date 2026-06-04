@@ -105,7 +105,7 @@ func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 
 		ct := http.DetectContentType(raw)
 		token := randomID()
-		key := fmt.Sprintf("snaps/%d/%s%s", snapID, randomID(), extForContentType(ct))
+		key := fmt.Sprintf("photos/%s%s", token, extForContentType(ct))
 
 		if err := h.storage.Put(ctx, key, bytes.NewReader(raw), ct); err != nil {
 			rollback()

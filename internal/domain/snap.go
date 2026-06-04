@@ -20,6 +20,6 @@ type Photo struct {
 	SnapID    int64     `db:"snap_id"    json:"snap_id"`
 	Token     string    `db:"token"      json:"-"`
 	URL       string    `db:"-"          json:"url"`
-	StoredKey string    `db:"stored_key" json:"stored_key"`
+	StoredKey string    `db:"stored_key" json:"-"`
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
