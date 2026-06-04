@@ -14,12 +14,12 @@ import (
 
 func TestPut_CreatesFile(t *testing.T) {
 	dir := t.TempDir()
-	s, err := local.New(dir, "http://localhost/uploads")
+	s, err := local.New(dir)
 	require.NoError(t, err)
 
 	url, err := s.Put(context.Background(), "test.jpg", strings.NewReader("imgdata"), "image/jpeg")
 	require.NoError(t, err)
-	assert.Equal(t, "http://localhost/uploads/test.jpg", url)
+	assert.Equal(t, "/uploads/test.jpg", url)
 
 	data, err := os.ReadFile(filepath.Join(dir, "test.jpg"))
 	require.NoError(t, err)
@@ -28,7 +28,7 @@ func TestPut_CreatesFile(t *testing.T) {
 
 func TestPut_CreatesNestedDirs(t *testing.T) {
 	dir := t.TempDir()
-	s, err := local.New(dir, "http://localhost/uploads")
+	s, err := local.New(dir)
 	require.NoError(t, err)
 
 	_, err = s.Put(context.Background(), "snaps/7/photo.jpg", strings.NewReader("data"), "image/jpeg")
@@ -40,7 +40,7 @@ func TestPut_CreatesNestedDirs(t *testing.T) {
 
 func TestDelete_RemovesFile(t *testing.T) {
 	dir := t.TempDir()
-	s, err := local.New(dir, "http://localhost/uploads")
+	s, err := local.New(dir)
 	require.NoError(t, err)
 
 	_, err = s.Put(context.Background(), "snap.jpg", strings.NewReader("x"), "image/jpeg")
@@ -52,7 +52,7 @@ func TestDelete_RemovesFile(t *testing.T) {
 	assert.True(t, os.IsNotExist(err))
 }
 
-func TestURL_ReturnsExpected(t *testing.T) {
-	s, _ := local.New(t.TempDir(), "http://localhost/uploads")
-	assert.Equal(t, "http://localhost/uploads/snaps/1/img.jpg", s.URL("snaps/1/img.jpg"))
+func TestURL_ReturnsRelativePath(t *testing.T) {
+	s, _ := local.New(t.TempDir())
+	assert.Equal(t, "/uploads/snaps/1/img.jpg", s.URL("snaps/1/img.jpg"))
 }

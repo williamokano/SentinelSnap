@@ -37,7 +37,7 @@ func main() {
 	var store storage.StorageProvider
 	switch cfg.StorageBackend {
 	case "local":
-		store, err = local.New(cfg.LocalUploadDir, cfg.LocalBaseURL)
+		store, err = local.New(cfg.LocalUploadDir)
 		if err != nil {
 			log.Fatalf("local storage: %v", err)
 		}
