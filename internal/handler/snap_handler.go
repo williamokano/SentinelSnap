@@ -8,9 +8,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/williamokano/sentinelsnap/internal/config"
 	"github.com/williamokano/sentinelsnap/internal/domain"
 	"github.com/williamokano/sentinelsnap/internal/repository"
@@ -137,8 +139,7 @@ func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *SnapHandler) DeleteSnap(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid snap id")
 		return
@@ -155,7 +156,9 @@ func (h *SnapHandler) DeleteSnap(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, p := range snap.Photos {
-		_ = h.storage.Delete(r.Context(), p.StoredKey)
+		if err := h.storage.Delete(r.Context(), p.StoredKey); err != nil {
+			log.Printf("warning: failed to delete stored file %q: %v", p.StoredKey, err)
+		}
 	}
 
 	if err := h.repo.DeleteSnap(r.Context(), id); err != nil {
