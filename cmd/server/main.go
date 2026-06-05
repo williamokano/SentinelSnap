@@ -15,6 +15,7 @@ import (
 	"github.com/williamokano/sentinelsnap/internal/router"
 	"github.com/williamokano/sentinelsnap/internal/storage"
 	"github.com/williamokano/sentinelsnap/internal/storage/local"
+	totpsvc "github.com/williamokano/sentinelsnap/internal/totp"
 )
 
 func main() {
@@ -48,7 +49,9 @@ func main() {
 
 	ev := hub.New()
 	h := handler.NewSnapHandler(repo, store, ev, cfg)
-	r := router.New(cfg, h, ev)
+	totpSvc := totpsvc.New(db, cfg.SecretKey)
+	totpHandler := handler.NewTOTPHandler(totpSvc)
+	r := router.New(cfg, h, ev, totpHandler)
 
 	addr := fmt.Sprintf(":%d", cfg.HTTPPort)
 	log.Printf("listening on %s", addr)

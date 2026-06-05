@@ -16,6 +16,8 @@ type Config struct {
 	DBDriver string
 	DBDSN    string
 
+	SecretKey string
+
 	StorageBackend string
 
 	LocalUploadDir string
@@ -44,6 +46,7 @@ func Load() (*Config, error) {
 		HTTPSEnabled:   httpsEnabled,
 		DBDriver:       getEnv("DB_DRIVER", "postgres"),
 		DBDSN:          dsn,
+		SecretKey:      getEnv("SECRET_KEY", "changeme-32-byte-secret-key-here"),
 		StorageBackend: getEnv("STORAGE_BACKEND", "local"),
 		LocalUploadDir: getEnv("LOCAL_UPLOAD_DIR", "./uploads"),
 		LocalBaseURL:   getEnv("LOCAL_BASE_URL", "http://localhost:8080/uploads"),

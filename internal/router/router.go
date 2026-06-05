@@ -18,7 +18,7 @@ import (
 //go:embed static
 var staticFiles embed.FS
 
-func New(cfg *config.Config, h *handler.SnapHandler, ev *hub.Hub) http.Handler {
+func New(cfg *config.Config, h *handler.SnapHandler, ev *hub.Hub, totp *handler.TOTPHandler) http.Handler {
 	r := chi.NewRouter()
 	r.Use(securityHeaders(cfg))
 	r.Use(middleware.Logger)
@@ -34,6 +34,13 @@ func New(cfg *config.Config, h *handler.SnapHandler, ev *hub.Hub) http.Handler {
 	r.Delete("/snaps/{id}", h.DeleteSnap)
 	r.Get("/photos/{token}", h.ServePhoto)
 	r.Get("/events", ev.ServeSSE)
+
+	r.Route("/mfa/totp", func(r chi.Router) {
+		r.Post("/setup", totp.Setup)
+		r.Post("/confirm", totp.Confirm)
+		r.Post("/verify", totp.Verify)
+		r.Delete("/", totp.Disable)
+	})
 
 	staticFS, _ := fs.Sub(staticFiles, "static")
 	r.Handle("/*", http.FileServer(http.FS(staticFS)))
