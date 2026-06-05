@@ -207,6 +207,26 @@ Stream a photo by its random token. Tokens are generated at upload time and stor
 
 ---
 
+### `GET /healthz`
+
+Health check endpoint. Returns `200` when the server is up and the database is reachable, or `503` when the database ping fails.
+
+**Response `200`:**
+
+```json
+{ "status": "ok" }
+```
+
+**Response `503`:**
+
+```json
+{ "status": "error", "error": "dial tcp ...: connection refused" }
+```
+
+Used by Docker and other orchestrators to determine container health.
+
+---
+
 ### `GET /events`
 
 Server-Sent Events stream. The browser connects once on page load and receives push notifications for all snap activity. See [docs/realtime.md](docs/realtime.md) for the full event reference.

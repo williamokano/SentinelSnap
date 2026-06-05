@@ -26,6 +26,12 @@ services:
       LOCAL_BASE_URL: ${LOCAL_BASE_URL:-http://localhost:8080/uploads}
     volumes:
       - uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
     depends_on:
       db:
         condition: service_healthy
