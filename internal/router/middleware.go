@@ -5,8 +5,11 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/williamokano/sentinelsnap/internal/config"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
 )
 
 const (
@@ -32,6 +35,25 @@ func securityHeaders(cfg *config.Config) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// routeTagger propagates the matched chi route pattern to the otelhttp labeler
+// so that HTTP metrics carry a populated http.route attribute.
+func routeTagger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		rctx := chi.RouteContext(ctx)
+		if rctx == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if pattern := rctx.RoutePattern(); pattern != "" {
+			if labeler, ok := otelhttp.LabelerFromContext(ctx); ok {
+				labeler.Add(semconv.HTTPRoute(pattern))
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func slogRequestLogger(next http.Handler) http.Handler {

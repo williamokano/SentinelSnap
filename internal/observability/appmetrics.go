@@ -1,0 +1,125 @@
+package observability
+
+import (
+	"context"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+)
+
+// AppMetrics holds all custom domain instruments. The zero value is safe to use
+// (all methods check for nil instruments and silently no-op), so callers do not
+// need to guard against disabled metrics.
+type AppMetrics struct {
+	meter           metric.Meter
+	snapsCreated    metric.Int64Counter
+	photosStored    metric.Int64Counter
+	photosBytesIn   metric.Int64Counter
+	photoSize       metric.Int64Histogram
+	sseClientsGauge metric.Int64ObservableGauge
+	sseBroadcasts   metric.Int64Counter
+}
+
+// newAppMetrics registers all custom instruments on mp.
+func newAppMetrics(mp metric.MeterProvider) (*AppMetrics, error) {
+	m := mp.Meter("sentinelsnap/app")
+	am := &AppMetrics{meter: m}
+	var err error
+
+	if am.snapsCreated, err = m.Int64Counter(
+		"sentinelsnap.snaps.created",
+		metric.WithDescription("Total number of snaps created"),
+		metric.WithUnit("{snap}"),
+	); err != nil {
+		return nil, err
+	}
+
+	if am.photosStored, err = m.Int64Counter(
+		"sentinelsnap.photos.stored",
+		metric.WithDescription("Total number of photos stored"),
+		metric.WithUnit("{photo}"),
+	); err != nil {
+		return nil, err
+	}
+
+	if am.photosBytesIn, err = m.Int64Counter(
+		"sentinelsnap.photos.bytes.stored",
+		metric.WithDescription("Total bytes of photo data stored"),
+		metric.WithUnit("By"),
+	); err != nil {
+		return nil, err
+	}
+
+	if am.photoSize, err = m.Int64Histogram(
+		"sentinelsnap.photo.size",
+		metric.WithDescription("Size distribution of individual uploaded photos"),
+		metric.WithUnit("By"),
+	); err != nil {
+		return nil, err
+	}
+
+	if am.sseBroadcasts, err = m.Int64Counter(
+		"sentinelsnap.sse.broadcasts",
+		metric.WithDescription("Total number of SSE broadcast events"),
+		metric.WithUnit("{broadcast}"),
+	); err != nil {
+		return nil, err
+	}
+
+	if am.sseClientsGauge, err = m.Int64ObservableGauge(
+		"sentinelsnap.sse.clients",
+		metric.WithDescription("Number of currently connected SSE clients"),
+		metric.WithUnit("{client}"),
+	); err != nil {
+		return nil, err
+	}
+	return am, nil
+}
+
+// SnapCreated increments the snaps.created counter.
+func (a *AppMetrics) SnapCreated(ctx context.Context) {
+	if a == nil || a.snapsCreated == nil {
+		return
+	}
+	a.snapsCreated.Add(ctx, 1)
+}
+
+// PhotoStored increments the photos.stored counter and records byte counts.
+func (a *AppMetrics) PhotoStored(ctx context.Context, sizeBytes int64) {
+	if a == nil {
+		return
+	}
+	if a.photosStored != nil {
+		a.photosStored.Add(ctx, 1)
+	}
+	if a.photosBytesIn != nil {
+		a.photosBytesIn.Add(ctx, sizeBytes)
+	}
+	if a.photoSize != nil {
+		a.photoSize.Record(ctx, sizeBytes)
+	}
+}
+
+// SSEBroadcast increments the sse.broadcasts counter with the given event type.
+func (a *AppMetrics) SSEBroadcast(ctx context.Context, eventType string) {
+	if a == nil || a.sseBroadcasts == nil {
+		return
+	}
+	a.sseBroadcasts.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("event_type", eventType),
+	))
+}
+
+// SetSSEClientsFn registers fn as the source for the sse.clients observable gauge.
+// Call this once the SSE hub is ready. Returns an error only if the gauge
+// instrument has not been initialized (i.e., OTel is disabled).
+func (a *AppMetrics) SetSSEClientsFn(fn func() int64) error {
+	if a == nil || a.sseClientsGauge == nil {
+		return nil
+	}
+	_, err := a.meter.RegisterCallback(func(_ context.Context, o metric.Observer) error {
+		o.ObserveInt64(a.sseClientsGauge, fn())
+		return nil
+	}, a.sseClientsGauge)
+	return err
+}

@@ -17,6 +17,7 @@ import (
 	"github.com/williamokano/sentinelsnap/internal/config"
 	"github.com/williamokano/sentinelsnap/internal/domain"
 	"github.com/williamokano/sentinelsnap/internal/hub"
+	"github.com/williamokano/sentinelsnap/internal/observability"
 	"github.com/williamokano/sentinelsnap/internal/repository"
 	"github.com/williamokano/sentinelsnap/internal/storage"
 )
@@ -26,10 +27,11 @@ type SnapHandler struct {
 	storage storage.StorageProvider
 	hub     *hub.Hub
 	cfg     *config.Config
+	metrics *observability.AppMetrics
 }
 
-func NewSnapHandler(repo repository.SnapRepository, store storage.StorageProvider, h *hub.Hub, cfg *config.Config) *SnapHandler {
-	return &SnapHandler{repo: repo, storage: store, hub: h, cfg: cfg}
+func NewSnapHandler(repo repository.SnapRepository, store storage.StorageProvider, h *hub.Hub, cfg *config.Config, metrics *observability.AppMetrics) *SnapHandler {
+	return &SnapHandler{repo: repo, storage: store, hub: h, cfg: cfg, metrics: metrics}
 }
 
 // flexFloat64 unmarshals from both JSON number and string,
@@ -127,6 +129,8 @@ func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		h.metrics.PhotoStored(ctx, int64(len(raw)))
+
 		photos = append(photos, domain.Photo{
 			ID:        photoID,
 			SnapID:    snapID,
@@ -144,6 +148,7 @@ func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 	}
 	h.hub.Broadcast(hub.EventSnapCreated, snap)
 	writeJSON(w, http.StatusCreated, snap)
+	h.metrics.SnapCreated(ctx)
 }
 
 func (h *SnapHandler) ServePhoto(w http.ResponseWriter, r *http.Request) {

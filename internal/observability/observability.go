@@ -3,6 +3,10 @@ package observability
 import (
 	"context"
 	"log/slog"
+	"net/http"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
 
 	"github.com/williamokano/sentinelsnap/internal/config"
 )
@@ -17,8 +21,8 @@ const (
 
 // Config holds all observability configuration.
 // Logging fields (LogLevel, LogFormat) are active in Phase 1.
-// OTel exporter fields are populated from the application config but not yet
-// consumed by any provider; they become active in Phase 2+.
+// OTel exporter fields are populated from the application config and consumed
+// by their respective providers (metrics in Phase 2, traces and log-push in Phase 3).
 type Config struct {
 	// Logging
 	LogLevel  string
@@ -33,6 +37,20 @@ type Config struct {
 	TracesMode      string
 	LogsMode        string
 	TraceSampleRate float64
+}
+
+// Result carries the outputs of Setup that callers need to wire into the
+// application (metrics handler for the router, custom domain instruments).
+type Result struct {
+	// Shutdown flushes and stops all providers. Call it on graceful shutdown.
+	Shutdown func(context.Context) error
+	// MetricsHandler is non-nil when MetricsMode is "pull"; mount it at /metrics.
+	MetricsHandler http.Handler
+	// AppMetrics holds custom domain instruments; always non-nil when OTEL_ENABLED.
+	AppMetrics *AppMetrics
+	// WrapHandler wraps h with OTel HTTP instrumentation. When OTel is disabled,
+	// it returns h unchanged.
+	WrapHandler func(h http.Handler) http.Handler
 }
 
 // FromAppConfig builds an observability Config from the application config.
@@ -52,16 +70,49 @@ func FromAppConfig(cfg *config.Config) Config {
 	}
 }
 
-// Setup initialises observability signals from cfg, installs a structured slog
-// logger as the process default, and returns a shutdown function that flushes
-// and stops all providers. LOG_LEVEL and LOG_FORMAT are always applied.
-// OTel metrics, traces, and log-push are not yet active (Phase 2+);
-// cfg.Enabled and the exporter fields are accepted but currently unused.
-func Setup(_ context.Context, cfg Config) (func(context.Context) error, error) {
+// Setup initialises all enabled observability signals, installs providers as
+// OTel globals, and sets the structured slog logger as the process default.
+// Returns a Result with a shutdown func, an optional /metrics handler, and app
+// metrics instruments. LOG_LEVEL/LOG_FORMAT are always applied; OTel metrics
+// are enabled when OTEL_ENABLED=true.
+func Setup(ctx context.Context, cfg Config) (Result, error) {
 	logger, err := newLogger(cfg)
 	if err != nil {
-		return nil, err
+		return Result{}, err
 	}
 	slog.SetDefault(logger)
-	return func(_ context.Context) error { return nil }, nil
+
+	if !cfg.Enabled {
+		return Result{
+			Shutdown:    func(context.Context) error { return nil },
+			WrapHandler: func(h http.Handler) http.Handler { return h },
+		}, nil
+	}
+
+	res, err := newResource(ctx, cfg)
+	if err != nil {
+		return Result{}, err
+	}
+
+	mp, metricsHandler, err := newMeterProvider(ctx, res, cfg)
+	if err != nil {
+		return Result{}, err
+	}
+	otel.SetMeterProvider(mp)
+
+	if err := startRuntimeMetrics(); err != nil {
+		return Result{}, err
+	}
+
+	am, err := newAppMetrics(mp)
+	if err != nil {
+		return Result{}, err
+	}
+
+	return Result{
+		Shutdown:       mp.Shutdown,
+		MetricsHandler: metricsHandler,
+		AppMetrics:     am,
+		WrapHandler:    func(h http.Handler) http.Handler { return otelhttp.NewHandler(h, "sentinelsnap") },
+	}, nil
 }
