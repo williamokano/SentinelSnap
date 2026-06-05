@@ -7,9 +7,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/williamokano/sentinelsnap/internal/config"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 func TestSecurityHeaders(t *testing.T) {
@@ -133,4 +136,33 @@ func TestRouteTagger_NilChiContext(t *testing.T) {
 		handler.ServeHTTP(w, req)
 	})
 	assert.True(t, called, "next handler should still be called")
+}
+
+func TestRouteTagger_InjectsRouteLabel(t *testing.T) {
+	// routeTagger must run inside a chi Group (after route matching) so that
+	// rctx.RoutePattern() is already populated. Mirror the actual router.go setup.
+	r := chi.NewRouter()
+	var capturedLabeler *otelhttp.Labeler
+	r.Group(func(r chi.Router) {
+		r.Use(routeTagger)
+		r.Get("/snaps/{id}", func(w http.ResponseWriter, r *http.Request) {
+			l, ok := otelhttp.LabelerFromContext(r.Context())
+			if ok {
+				capturedLabeler = l
+			}
+		})
+	})
+
+	wrapped := otelhttp.NewHandler(r, "test")
+	req := httptest.NewRequest(http.MethodGet, "/snaps/42", nil)
+	wrapped.ServeHTTP(httptest.NewRecorder(), req)
+
+	require.NotNil(t, capturedLabeler, "otelhttp labeler not found in context")
+	var routeLabel string
+	for _, a := range capturedLabeler.Get() {
+		if string(a.Key) == "http.route" {
+			routeLabel = a.Value.AsString()
+		}
+	}
+	assert.Equal(t, "/snaps/{id}", routeLabel)
 }

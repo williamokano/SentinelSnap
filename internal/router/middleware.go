@@ -67,6 +67,12 @@ func slogRequestLogger(next http.Handler) http.Handler {
 			if status == 0 {
 				status = http.StatusOK
 			}
+			route := r.URL.Path
+			if rctx := chi.RouteContext(ctx); rctx != nil {
+				if p := rctx.RoutePattern(); p != "" {
+					route = p
+				}
+			}
 			logFn := slog.InfoContext
 			if status >= 500 {
 				logFn = slog.ErrorContext
@@ -76,6 +82,7 @@ func slogRequestLogger(next http.Handler) http.Handler {
 			logFn(ctx, "request",
 				"method", r.Method,
 				"path", r.URL.Path,
+				"route", route,
 				"status", status,
 				"bytes", ww.BytesWritten(),
 				"duration_ms", time.Since(t).Milliseconds(),

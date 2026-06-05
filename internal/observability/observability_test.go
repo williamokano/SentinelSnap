@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 )
 
 func TestSetup_DisabledPath(t *testing.T) {
@@ -73,6 +74,11 @@ func TestConfigValidate(t *testing.T) {
 		c.TracesMode = "scrape"
 		assert.ErrorContains(t, c.Validate(), "OTEL_TRACES_MODE")
 	})
+	t.Run("invalid LogsMode", func(t *testing.T) {
+		c := base
+		c.LogsMode = "scrape"
+		assert.ErrorContains(t, c.Validate(), "OTEL_LOGS_MODE")
+	})
 	t.Run("sample rate below 0", func(t *testing.T) {
 		c := base
 		c.TraceSampleRate = -0.1
@@ -107,10 +113,32 @@ func TestAppMetrics_ZeroValueSafe(t *testing.T) {
 }
 
 func TestAppMetrics_SetSSEClientsFn_DoubleRegister(t *testing.T) {
-	// With no gauge initialized, second call should still be a no-op (gauge is nil).
-	am := &AppMetrics{}
+	mp := sdkmetric.NewMeterProvider()
+	defer mp.Shutdown(context.Background()) //nolint:errcheck
+	am, err := newAppMetrics(mp)
+	require.NoError(t, err)
 	assert.NoError(t, am.SetSSEClientsFn(func() int64 { return 1 }))
-	assert.NoError(t, am.SetSSEClientsFn(func() int64 { return 2 }))
+	err = am.SetSSEClientsFn(func() int64 { return 2 })
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "more than once")
+}
+
+func TestSetup_EnabledPullMetrics(t *testing.T) {
+	cfg := Config{
+		LogLevel:        "info",
+		LogFormat:       "json",
+		Enabled:         true,
+		ServiceName:     "test-svc",
+		MetricsMode:     ModePull,
+		TracesMode:      ModeOff,
+		LogsMode:        ModeStdout,
+		TraceSampleRate: 1.0,
+	}
+	res, err := Setup(context.Background(), cfg)
+	require.NoError(t, err)
+	assert.NotNil(t, res.MetricsHandler)
+	assert.NotNil(t, res.AppMetrics)
+	require.NoError(t, res.Shutdown(context.Background()))
 }
 
 // dummyHandler is a minimal http.Handler for use in tests.

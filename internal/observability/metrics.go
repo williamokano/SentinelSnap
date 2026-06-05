@@ -16,6 +16,23 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+// photoSizeView overrides the default histogram boundaries for sentinelsnap.photo.size.
+// The OTel default caps at ~10 KB, which puts all real photos in the +Inf bucket.
+// These boundaries cover the typical range for compressed mobile photos up to 10 MB.
+func photoSizeView() sdkmetric.View {
+	return sdkmetric.NewView(
+		sdkmetric.Instrument{Name: "sentinelsnap.photo.size"},
+		sdkmetric.Stream{
+			Aggregation: sdkmetric.AggregationExplicitBucketHistogram{
+				Boundaries: []float64{
+					10_000, 50_000, 100_000, 500_000,
+					1_000_000, 2_500_000, 5_000_000, 10_000_000,
+				},
+			},
+		},
+	)
+}
+
 // newMeterProvider builds a MeterProvider according to cfg.MetricsMode.
 // Pull mode: returns a Prometheus exporter and a promhttp.Handler for the router.
 // Push mode: returns an OTLP exporter sending to cfg.OTLPEndpoint.
@@ -28,7 +45,10 @@ func newMeterProvider(ctx context.Context, res *resource.Resource, cfg Config) (
 	case ModePush:
 		return newOTLPMeterProvider(ctx, res, cfg)
 	case ModeOff:
-		mp := sdkmetric.NewMeterProvider(sdkmetric.WithResource(res))
+		mp := sdkmetric.NewMeterProvider(
+			sdkmetric.WithResource(res),
+			sdkmetric.WithView(photoSizeView()),
+		)
 		return mp, nil, nil
 	default:
 		return nil, nil, fmt.Errorf("unknown OTEL_METRICS_MODE %q (valid: pull, push, off)", cfg.MetricsMode)
@@ -47,6 +67,7 @@ func newPrometheusMeterProvider(res *resource.Resource) (*sdkmetric.MeterProvide
 	mp := sdkmetric.NewMeterProvider(
 		sdkmetric.WithResource(res),
 		sdkmetric.WithReader(exp),
+		sdkmetric.WithView(photoSizeView()),
 	)
 	h := promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg})
 	return mp, h, nil
@@ -70,6 +91,7 @@ func newOTLPMeterProvider(ctx context.Context, res *resource.Resource, cfg Confi
 	mp := sdkmetric.NewMeterProvider(
 		sdkmetric.WithResource(res),
 		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(exp, sdkmetric.WithInterval(15*time.Second))),
+		sdkmetric.WithView(photoSizeView()),
 	)
 	return mp, nil, nil
 }

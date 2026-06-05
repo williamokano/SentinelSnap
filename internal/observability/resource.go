@@ -4,12 +4,19 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"runtime/debug"
 
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
 )
 
-const serviceVersion = "dev"
+var serviceVersion = "dev"
+
+func init() {
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		serviceVersion = info.Main.Version
+	}
+}
 
 func newResource(ctx context.Context, cfg Config) (*resource.Resource, error) {
 	res, err := resource.New(ctx,

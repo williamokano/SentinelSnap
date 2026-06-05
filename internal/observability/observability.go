@@ -62,12 +62,17 @@ type Result struct {
 // Setup calls this automatically; call it early in tests or CLIs that build
 // Config directly.
 func (c Config) Validate() error {
-	valid := map[string]bool{ModeOff: true, ModePull: true, ModePush: true, ModeStdout: true}
-	if !valid[c.MetricsMode] {
+	validMetrics := map[string]bool{ModeOff: true, ModePull: true, ModePush: true}
+	validTraces := map[string]bool{ModeOff: true, ModePush: true}
+	validLogs := map[string]bool{ModeStdout: true, ModePush: true}
+	if !validMetrics[c.MetricsMode] {
 		return fmt.Errorf("invalid OTEL_METRICS_MODE %q (valid: off, pull, push)", c.MetricsMode)
 	}
-	if !valid[c.TracesMode] {
+	if !validTraces[c.TracesMode] {
 		return fmt.Errorf("invalid OTEL_TRACES_MODE %q (valid: off, push)", c.TracesMode)
+	}
+	if !validLogs[c.LogsMode] {
+		return fmt.Errorf("invalid OTEL_LOGS_MODE %q (valid: stdout, push)", c.LogsMode)
 	}
 	if c.TraceSampleRate < 0 || c.TraceSampleRate > 1 {
 		return fmt.Errorf("OTEL_TRACES_SAMPLER_ARG %v out of [0.0, 1.0]", c.TraceSampleRate)
