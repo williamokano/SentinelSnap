@@ -93,10 +93,17 @@ func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 	var photos []domain.Photo
 
 	rollback := func() {
+		bg := context.Background()
 		for _, key := range storedKeys {
-			_ = h.storage.Delete(context.Background(), key)
+			if err := h.storage.Delete(bg, key); err != nil {
+				slog.ErrorContext(bg, "rollback: failed to delete stored photo",
+					"key", key, "snap_id", snapID, "error", err)
+			}
 		}
-		_ = h.repo.DeleteSnap(context.Background(), snapID)
+		if err := h.repo.DeleteSnap(bg, snapID); err != nil {
+			slog.ErrorContext(bg, "rollback: failed to delete snap record",
+				"snap_id", snapID, "error", err)
+		}
 	}
 
 	for i, data := range req.Photos {
@@ -257,7 +264,9 @@ func (h *SnapHandler) ListSnaps(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Error("writeJSON: failed to encode response", "error", err)
+	}
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {

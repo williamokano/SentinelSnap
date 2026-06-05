@@ -63,3 +63,74 @@ func TestSlogRequestLogger_PanicLoggedAs500(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.Contains(t, buf.String(), `"status":500`)
 }
+
+func TestSlogRequestLogger_StatusCodes(t *testing.T) {
+	tests := []struct {
+		name           string
+		handlerStatus  int
+		writeBody      bool
+		expectedStatus int
+	}{
+		{"200 OK", http.StatusOK, true, http.StatusOK},
+		{"400 Bad Request", http.StatusBadRequest, true, http.StatusBadRequest},
+		{"500 Internal Error", http.StatusInternalServerError, true, http.StatusInternalServerError},
+		{"no write defaults to 200", 0, false, http.StatusOK},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var logBuf bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
+			slog.SetDefault(logger)
+
+			handler := slogRequestLogger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.writeBody {
+					w.WriteHeader(tc.handlerStatus)
+				}
+			}))
+
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			// no chi context attached — tests the plain request path
+			w := httptest.NewRecorder()
+
+			handler.ServeHTTP(w, req)
+
+			logOutput := logBuf.String()
+			assert.Contains(t, logOutput, "request")
+		})
+	}
+}
+
+func TestSlogRequestLogger_NoWriteDefaultsTo200(t *testing.T) {
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
+	slog.SetDefault(logger)
+
+	handler := slogRequestLogger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// write nothing — status should default to 200
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/silent", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	assert.Contains(t, logBuf.String(), `"status":200`)
+}
+
+func TestRouteTagger_NilChiContext(t *testing.T) {
+	called := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	})
+
+	handler := routeTagger(next)
+
+	// Request with no chi route context attached — should not panic.
+	req := httptest.NewRequest(http.MethodGet, "/anything", nil)
+	w := httptest.NewRecorder()
+
+	assert.NotPanics(t, func() {
+		handler.ServeHTTP(w, req)
+	})
+	assert.True(t, called, "next handler should still be called")
+}

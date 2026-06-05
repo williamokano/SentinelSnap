@@ -2,6 +2,7 @@ package observability
 
 import (
 	"context"
+	"fmt"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -11,13 +12,14 @@ import (
 // (all methods check for nil instruments and silently no-op), so callers do not
 // need to guard against disabled metrics.
 type AppMetrics struct {
-	meter           metric.Meter
-	snapsCreated    metric.Int64Counter
-	photosStored    metric.Int64Counter
-	photosBytesIn   metric.Int64Counter
-	photoSize       metric.Int64Histogram
-	sseClientsGauge metric.Int64ObservableGauge
-	sseBroadcasts   metric.Int64Counter
+	meter                 metric.Meter // retained solely for RegisterCallback in SetSSEClientsFn
+	snapsCreated          metric.Int64Counter
+	photosStored          metric.Int64Counter
+	photosBytesIn         metric.Int64Counter
+	photoSize             metric.Int64Histogram
+	sseClientsGauge       metric.Int64ObservableGauge
+	sseBroadcasts         metric.Int64Counter
+	sseCallbackRegistered bool
 }
 
 // newAppMetrics registers all custom instruments on mp.
@@ -86,18 +88,12 @@ func (a *AppMetrics) SnapCreated(ctx context.Context) {
 
 // PhotoStored increments the photos.stored counter and records byte counts.
 func (a *AppMetrics) PhotoStored(ctx context.Context, sizeBytes int64) {
-	if a == nil {
+	if a == nil || a.photosStored == nil {
 		return
 	}
-	if a.photosStored != nil {
-		a.photosStored.Add(ctx, 1)
-	}
-	if a.photosBytesIn != nil {
-		a.photosBytesIn.Add(ctx, sizeBytes)
-	}
-	if a.photoSize != nil {
-		a.photoSize.Record(ctx, sizeBytes)
-	}
+	a.photosStored.Add(ctx, 1)
+	a.photosBytesIn.Add(ctx, sizeBytes)
+	a.photoSize.Record(ctx, sizeBytes)
 }
 
 // SSEBroadcast increments the sse.broadcasts counter with the given event type.
@@ -111,15 +107,20 @@ func (a *AppMetrics) SSEBroadcast(ctx context.Context, eventType string) {
 }
 
 // SetSSEClientsFn registers fn as the source for the sse.clients observable gauge.
-// Call this once the SSE hub is ready. Returns an error only if the gauge
-// instrument has not been initialized (i.e., OTel is disabled).
+// Call this once the SSE hub is ready; calling it more than once returns an error.
 func (a *AppMetrics) SetSSEClientsFn(fn func() int64) error {
 	if a == nil || a.sseClientsGauge == nil {
 		return nil
+	}
+	if a.sseCallbackRegistered {
+		return fmt.Errorf("observability: SetSSEClientsFn called more than once")
 	}
 	_, err := a.meter.RegisterCallback(func(_ context.Context, o metric.Observer) error {
 		o.ObserveInt64(a.sseClientsGauge, fn())
 		return nil
 	}, a.sseClientsGauge)
+	if err == nil {
+		a.sseCallbackRegistered = true
+	}
 	return err
 }

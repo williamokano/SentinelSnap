@@ -2,6 +2,7 @@ package observability
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -41,16 +42,37 @@ type Config struct {
 
 // Result carries the outputs of Setup that callers need to wire into the
 // application (metrics handler for the router, custom domain instruments).
+// Shutdown and WrapHandler are always non-nil. MetricsHandler is non-nil only
+// in pull metrics mode. AppMetrics is always non-nil; its methods are no-ops
+// when OTel is disabled.
 type Result struct {
 	// Shutdown flushes and stops all providers. Call it on graceful shutdown.
 	Shutdown func(context.Context) error
 	// MetricsHandler is non-nil when MetricsMode is "pull"; mount it at /metrics.
 	MetricsHandler http.Handler
-	// AppMetrics holds custom domain instruments; always non-nil when OTEL_ENABLED.
+	// AppMetrics holds custom domain instruments. Always non-nil; methods no-op
+	// when OTel is disabled.
 	AppMetrics *AppMetrics
 	// WrapHandler wraps h with OTel HTTP instrumentation. When OTel is disabled,
 	// it returns h unchanged.
 	WrapHandler func(h http.Handler) http.Handler
+}
+
+// Validate checks that mode strings and sample rate are within valid ranges.
+// Setup calls this automatically; call it early in tests or CLIs that build
+// Config directly.
+func (c Config) Validate() error {
+	valid := map[string]bool{ModeOff: true, ModePull: true, ModePush: true, ModeStdout: true}
+	if !valid[c.MetricsMode] {
+		return fmt.Errorf("invalid OTEL_METRICS_MODE %q (valid: off, pull, push)", c.MetricsMode)
+	}
+	if !valid[c.TracesMode] {
+		return fmt.Errorf("invalid OTEL_TRACES_MODE %q (valid: off, push)", c.TracesMode)
+	}
+	if c.TraceSampleRate < 0 || c.TraceSampleRate > 1 {
+		return fmt.Errorf("OTEL_TRACES_SAMPLER_ARG %v out of [0.0, 1.0]", c.TraceSampleRate)
+	}
+	return nil
 }
 
 // FromAppConfig builds an observability Config from the application config.
@@ -82,12 +104,23 @@ func Setup(ctx context.Context, cfg Config) (Result, error) {
 	}
 	slog.SetDefault(logger)
 
+	if err := cfg.Validate(); err != nil {
+		return Result{}, err
+	}
+
 	if !cfg.Enabled {
 		return Result{
 			Shutdown:    func(context.Context) error { return nil },
 			WrapHandler: func(h http.Handler) http.Handler { return h },
+			AppMetrics:  &AppMetrics{},
 		}, nil
 	}
+
+	// Route OTel-internal errors (e.g. OTLP export failures) to slog so they
+	// appear in the structured log stream rather than going to os.Stderr.
+	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
+		slog.Error("opentelemetry internal error", "error", err)
+	}))
 
 	res, err := newResource(ctx, cfg)
 	if err != nil {
@@ -100,7 +133,7 @@ func Setup(ctx context.Context, cfg Config) (Result, error) {
 	}
 	otel.SetMeterProvider(mp)
 
-	if err := startRuntimeMetrics(); err != nil {
+	if err := startRuntimeMetrics(mp); err != nil {
 		return Result{}, err
 	}
 

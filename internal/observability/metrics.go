@@ -57,13 +57,11 @@ func newOTLPMeterProvider(ctx context.Context, res *resource.Resource, cfg Confi
 	var err error
 	if cfg.OTLPProtocol == "grpc" {
 		exp, err = otlpmetricgrpc.New(ctx,
-			otlpmetricgrpc.WithEndpoint(cfg.OTLPEndpoint),
-			otlpmetricgrpc.WithInsecure(),
+			otlpmetricgrpc.WithEndpointURL(cfg.OTLPEndpoint),
 		)
 	} else {
 		exp, err = otlpmetrichttp.New(ctx,
-			otlpmetrichttp.WithEndpoint(cfg.OTLPEndpoint),
-			otlpmetrichttp.WithInsecure(),
+			otlpmetrichttp.WithEndpointURL(cfg.OTLPEndpoint),
 		)
 	}
 	if err != nil {

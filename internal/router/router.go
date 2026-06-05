@@ -3,6 +3,7 @@ package router
 import (
 	"bytes"
 	"embed"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -31,6 +32,13 @@ func New(cfg *config.Config, h *handler.SnapHandler, ev *hub.Hub, hh *handler.He
 		r.Handle("/metrics", metricsHandler)
 	}
 
+	staticFS, err := fs.Sub(staticFiles, "static")
+	if err != nil {
+		// Should never happen: the "static" directory is verified at compile time
+		// by the //go:embed directive. Fail fast rather than serving 500s at runtime.
+		panic(fmt.Sprintf("router: embedded static FS unavailable: %v", err))
+	}
+
 	r.Group(func(r chi.Router) {
 		// Order matters: RequestID before the logger so request_id is loggable,
 		// and Recoverer inside the logger so the 500 it writes on panic is the
@@ -55,7 +63,6 @@ func New(cfg *config.Config, h *handler.SnapHandler, ev *hub.Hub, hh *handler.He
 			r.Handle("/uploads/*", http.StripPrefix("/uploads/", fileServer))
 		}
 
-		staticFS, _ := fs.Sub(staticFiles, "static")
 		r.Handle("/*", http.FileServer(http.FS(staticFS)))
 	})
 
