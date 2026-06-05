@@ -48,7 +48,7 @@ func TestGet_ReturnsContent(t *testing.T) {
 
 	rc, ct, err := s.Get(context.Background(), "snap.jpg")
 	require.NoError(t, err)
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	assert.Equal(t, "image/jpeg", ct)
 	data, err := io.ReadAll(rc)

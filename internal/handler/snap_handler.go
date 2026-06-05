@@ -163,7 +163,7 @@ func (h *SnapHandler) ServePhoto(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not read photo")
 		return
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	w.Header().Set("Content-Type", ct)
 	if _, err := io.Copy(w, rc); err != nil {

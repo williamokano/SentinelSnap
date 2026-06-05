@@ -32,7 +32,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("connect db: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	if err := migrate.Run(db); err != nil {
 		log.Fatalf("migrations: %v", err)
