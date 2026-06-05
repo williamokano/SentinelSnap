@@ -1,10 +1,13 @@
 package hub
 
 import (
+	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"sync"
+
+	"github.com/williamokano/sentinelsnap/internal/observability"
 )
 
 const (
@@ -16,16 +19,20 @@ const (
 type Hub struct {
 	mu      sync.Mutex
 	clients map[chan []byte]struct{}
+	metrics *observability.AppMetrics
 }
 
-func New() *Hub {
-	return &Hub{clients: make(map[chan []byte]struct{})}
+func New(metrics *observability.AppMetrics) *Hub {
+	return &Hub{
+		clients: make(map[chan []byte]struct{}),
+		metrics: metrics,
+	}
 }
 
-func (h *Hub) Broadcast(eventType string, payload any) {
+func (h *Hub) Broadcast(ctx context.Context, eventType string, payload any) {
 	data, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("hub: marshal error: %v", err)
+		slog.ErrorContext(ctx, "hub: marshal error", "error", err)
 		return
 	}
 	msg := append([]byte("event: "+eventType+"\ndata: "), data...)
@@ -39,6 +46,14 @@ func (h *Hub) Broadcast(eventType string, payload any) {
 		default:
 		}
 	}
+	h.metrics.SSEBroadcast(ctx, eventType)
+}
+
+// ClientCount returns the number of currently connected SSE clients.
+func (h *Hub) ClientCount() int64 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return int64(len(h.clients))
 }
 
 // Close closes all active SSE client channels so that ServeSSE handlers

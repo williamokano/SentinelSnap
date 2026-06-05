@@ -10,6 +10,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
+	nooptrace "go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/williamokano/sentinelsnap/internal/config"
 )
@@ -149,16 +150,21 @@ func Setup(ctx context.Context, cfg Config) (Result, error) {
 		return Result{}, err
 	}
 
-	tp, err := newTracerProvider(ctx, res, cfg)
-	if err != nil {
-		return Result{}, err
-	}
-	otel.SetTracerProvider(tp)
-	if cfg.TracesMode != ModeOff {
+	var tpShutdown func(context.Context) error
+	if cfg.TracesMode == ModeOff {
+		otel.SetTracerProvider(nooptrace.NewTracerProvider())
+		tpShutdown = func(context.Context) error { return nil }
+	} else {
+		tp, err := newTracerProvider(ctx, res, cfg)
+		if err != nil {
+			return Result{}, err
+		}
+		otel.SetTracerProvider(tp)
 		otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 			propagation.TraceContext{},
 			propagation.Baggage{},
 		))
+		tpShutdown = tp.Shutdown
 	}
 
 	slog.Info("observability configured",
@@ -167,7 +173,7 @@ func Setup(ctx context.Context, cfg Config) (Result, error) {
 		"logs_mode", cfg.LogsMode,
 	)
 
-	shutdowns := []func(context.Context) error{mp.Shutdown, tp.Shutdown}
+	shutdowns := []func(context.Context) error{mp.Shutdown, tpShutdown}
 
 	if cfg.LogsMode == ModePush {
 		lp, err := newLogProvider(ctx, res, cfg)

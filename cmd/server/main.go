@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log"
@@ -15,7 +16,7 @@ import (
 	"github.com/XSAM/otelsql"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
-	semconv "go.opentelemetry.io/otel/semconv/v1.30.0"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/williamokano/sentinelsnap/internal/config"
 	"github.com/williamokano/sentinelsnap/internal/handler"
@@ -42,14 +43,17 @@ func main() {
 		log.Fatalf("observability: %v", err)
 	}
 
-	// otelsql registers a wrapped driver under a generated name and returns a
-	// *sql.DB bound to it. sqlx.NewDb is passed the original "postgres" name so
-	// that sqlx resolves the DOLLAR bind-var style ($1, $2, …). Using the
-	// otelsql-generated driver name would cause sqlx to fall back to ?
-	// placeholders, breaking all parameterised queries.
-	stdDB, err := otelsql.Open(cfg.DBDriver, cfg.DBDSN,
-		otelsql.WithAttributes(semconv.DBSystemNamePostgreSQL),
-	)
+	// When OTel is enabled, wrap the driver with otelsql for DB span instrumentation
+	// and pool metrics. When disabled, use the plain driver to avoid overhead.
+	// sqlx.NewDb is always given "postgres" so that sqlx keeps $N bindvar style ($1, $2, …).
+	var stdDB *sql.DB
+	if cfg.OtelEnabled {
+		stdDB, err = otelsql.Open(cfg.DBDriver, cfg.DBDSN,
+			otelsql.WithAttributes(attribute.String("db.system.name", "postgresql")),
+		)
+	} else {
+		stdDB, err = sql.Open(cfg.DBDriver, cfg.DBDSN)
+	}
 	if err != nil {
 		slog.Error("open db", "driver", cfg.DBDriver, "error", err)
 		os.Exit(1)
@@ -60,12 +64,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	dbStatsReg, err := otelsql.RegisterDBStatsMetrics(stdDB,
-		otelsql.WithAttributes(semconv.DBSystemNamePostgreSQL),
-	)
-	if err != nil {
-		slog.Error("db stats metrics", "error", err)
-		os.Exit(1)
+	var dbStatsReg interface{ Unregister() error }
+	if cfg.OtelEnabled {
+		dbStatsReg, err = otelsql.RegisterDBStatsMetrics(stdDB,
+			otelsql.WithAttributes(attribute.String("db.system.name", "postgresql")),
+		)
+		if err != nil {
+			slog.Error("db stats metrics", "error", err)
+			os.Exit(1)
+		}
 	}
 
 	if err := migrate.Run(db); err != nil {
@@ -88,7 +95,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	ev := hub.New()
+	ev := hub.New(obs.AppMetrics)
+	if err := obs.AppMetrics.SetSSEClientsFn(ev.ClientCount); err != nil {
+		slog.Error("sse clients gauge", "error", err)
+		os.Exit(1)
+	}
 	h := handler.NewSnapHandler(repo, store, ev, cfg, obs.AppMetrics)
 	hh := handler.NewHealthHandler(db)
 	r := router.New(cfg, h, ev, hh, obs.MetricsHandler)
@@ -110,14 +121,16 @@ func main() {
 	<-ctx.Done()
 	slog.Info("shutting down")
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.ShutdownTimeoutSeconds)*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("http server shutdown", "error", err)
 	}
-	if err := dbStatsReg.Unregister(); err != nil {
-		slog.Error("db stats unregister", "error", err)
+	if dbStatsReg != nil {
+		if err := dbStatsReg.Unregister(); err != nil {
+			slog.Error("db stats unregister", "error", err)
+		}
 	}
 	if err := db.Close(); err != nil {
 		slog.Error("db close", "error", err)
@@ -128,5 +141,5 @@ func main() {
 	if err := obs.Shutdown(shutdownCtx); err != nil {
 		log.Printf("observability shutdown: %v", err)
 	}
-	slog.Info("server stopped")
+	log.Printf("server stopped")
 }

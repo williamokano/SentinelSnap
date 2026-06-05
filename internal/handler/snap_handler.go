@@ -153,9 +153,9 @@ func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 		Longitude: float64(req.Longitude),
 		Photos:    photos,
 	}
-	h.hub.Broadcast(hub.EventSnapCreated, snap)
-	writeJSON(w, http.StatusCreated, snap)
 	h.metrics.SnapCreated(ctx)
+	h.hub.Broadcast(ctx, hub.EventSnapCreated, snap)
+	writeJSON(w, http.StatusCreated, snap)
 }
 
 func (h *SnapHandler) ServePhoto(w http.ResponseWriter, r *http.Request) {
@@ -211,7 +211,7 @@ func (h *SnapHandler) UpdateSnap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.hub.Broadcast(hub.EventSnapUpdated, map[string]any{"id": id, "name": req.Name})
+	h.hub.Broadcast(r.Context(), hub.EventSnapUpdated, map[string]any{"id": id, "name": req.Name})
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "name": req.Name})
 }
 
@@ -243,7 +243,7 @@ func (h *SnapHandler) DeleteSnap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.hub.Broadcast(hub.EventSnapDeleted, map[string]int64{"id": id})
+	h.hub.Broadcast(r.Context(), hub.EventSnapDeleted, map[string]int64{"id": id})
 	w.WriteHeader(http.StatusNoContent)
 }
 

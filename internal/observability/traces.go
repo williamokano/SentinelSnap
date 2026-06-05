@@ -11,16 +11,11 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 )
 
-// newTracerProvider builds a TracerProvider according to cfg.TracesMode.
-// Push mode: sends spans to cfg.OTLPEndpoint via batch processor. Sampler uses
+// newTracerProvider builds an OTLP-push TracerProvider. Sampler uses
 // TraceIDRatioBased for root spans; child spans honour the parent's sampling
 // decision (ParentBased wrapper). Set TraceSampleRate=1.0 to always follow parent.
-// Off mode: returns a no-op provider (spans are still created but not exported).
+// Off mode is handled by the caller via a noop provider.
 func newTracerProvider(ctx context.Context, res *resource.Resource, cfg Config) (*sdktrace.TracerProvider, error) {
-	if cfg.TracesMode == ModeOff {
-		return sdktrace.NewTracerProvider(sdktrace.WithResource(res)), nil
-	}
-
 	var exp sdktrace.SpanExporter
 	var err error
 	if cfg.OTLPProtocol == "grpc" {
