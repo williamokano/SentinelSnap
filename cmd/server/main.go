@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
@@ -51,8 +56,27 @@ func main() {
 	r := router.New(cfg, h, ev)
 
 	addr := fmt.Sprintf(":%d", cfg.HTTPPort)
-	log.Printf("listening on %s", addr)
-	if err := http.ListenAndServe(addr, r); err != nil {
-		log.Fatalf("serve: %v", err)
+	srv := &http.Server{Addr: addr, Handler: r}
+
+	go func() {
+		log.Printf("listening on %s", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("serve: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("shutting down...")
+
+	timeout := time.Duration(cfg.ShutdownTimeoutSeconds) * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("shutdown error: %v", err)
 	}
+	ev.Close()
+	log.Println("server stopped")
 }
