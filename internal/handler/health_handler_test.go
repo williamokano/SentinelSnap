@@ -24,10 +24,10 @@ func (s *stubPinger) PingContext(_ context.Context) error {
 
 func TestHealthCheck(t *testing.T) {
 	tests := []struct {
-		name           string
-		pingerErr      error
-		wantStatus     int
-		wantBody       map[string]string
+		name       string
+		pingerErr  error
+		wantStatus int
+		wantBody   map[string]string
 	}{
 		{
 			name:       "healthy: ping returns nil → 200 ok",
