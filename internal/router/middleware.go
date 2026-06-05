@@ -8,7 +8,7 @@ import (
 
 const (
 	cspValue = "default-src 'self'; " +
-		"img-src 'self' data: https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com https://server.arcgisonline.com; " +
+		"img-src 'self' data: https://unpkg.com https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com https://server.arcgisonline.com; " +
 		"script-src 'self' https://unpkg.com; " +
 		"style-src 'self' https://unpkg.com"
 )

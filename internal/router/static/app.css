@@ -1,0 +1,36 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: system-ui, sans-serif; display: flex; flex-direction: column; height: 100vh; }
+header { background: #1a1a2e; color: #e0e0e0; padding: 12px 20px; font-size: 1.1rem; font-weight: 600; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: space-between; }
+#map { flex: 1; }
+.popup-photos { display: flex; flex-wrap: wrap; gap: 6px; max-width: 280px; margin-top: 8px; }
+.popup-photos img { width: 80px; height: 80px; object-fit: cover; border-radius: 4px; cursor: pointer; }
+.popup-meta { font-size: 0.8rem; color: #666; margin-top: 4px; }
+.popup-title { font-weight: 600; }
+.btn-edit { margin-top: 8px; padding: 4px 10px; background: #2471a3; color: #fff; border: none; border-radius: 4px; font-size: 0.75rem; cursor: pointer; }
+.btn-edit:hover { background: #1a5276; }
+.popup-actions { display: flex; gap: 6px; margin-top: 8px; }
+.name-input { font-size: 0.95rem; font-weight: 600; border: 1px solid #aaa; border-radius: 3px; padding: 1px 4px; width: 100%; max-width: 220px; }
+#lightbox { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 9999; align-items: center; justify-content: center; }
+#lightbox.open { display: flex; }
+#lightbox img { max-width: 90vw; max-height: 90vh; border-radius: 8px; box-shadow: 0 4px 32px rgba(0,0,0,0.6); }
+#lightbox-close { position: absolute; top: 20px; right: 28px; color: #fff; font-size: 2rem; cursor: pointer; line-height: 1; }
+.btn-delete { margin-top: 8px; padding: 4px 10px; background: #c0392b; color: #fff; border: none; border-radius: 4px; font-size: 0.75rem; cursor: pointer; }
+.btn-delete:hover { background: #a93226; }
+#toast-container { position: fixed; bottom: 24px; right: 24px; display: flex; flex-direction: column; gap: 8px; z-index: 10000; pointer-events: none; }
+.toast { background: #1a1a2e; color: #e0e0e0; padding: 10px 16px; border-radius: 6px; font-size: 0.85rem; box-shadow: 0 2px 12px rgba(0,0,0,0.4); opacity: 0; transform: translateY(8px); transition: opacity 0.25s, transform 0.25s; }
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast.toast-danger { background: #6b1a1a; }
+.toast.toast-info { background: #1a3a6b; }
+.theme-toggle { display: flex; gap: 4px; }
+.theme-toggle button {
+  background: transparent;
+  border: 1px solid #555;
+  color: #ccc;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.theme-toggle button:hover { background: #2a2a4e; border-color: #888; color: #fff; }
+.theme-toggle button.active { background: #4a90d9; border-color: #4a90d9; color: #fff; }
