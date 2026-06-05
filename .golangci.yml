@@ -1,3 +1,5 @@
+version: "2"
+
 run:
   timeout: 5m
 
@@ -8,15 +10,29 @@ linters:
     - gosec
     - misspell
     - unconvert
-    - goimports
+  exclusions:
+    rules:
+      # G706: log injection — logging URL paths and request bodies is intentional in debug mode
+      - path: internal/router/router.go
+        linters: [gosec]
+        text: "G706"
+      # G706: logging the photo token on stream error is intentional
+      - path: internal/handler/snap_handler.go
+        linters: [gosec]
+        text: "G706"
+      # G104/errcheck: w.Write in SSE loop — errors are handled by client disconnect detection
+      - path: internal/hub/hub.go
+        linters: [gosec, errcheck]
+        text: "w.Write|G104"
+      # G304: file paths come from DB-stored keys, not raw user input
+      - path: internal/storage/local/local_storage.go
+        linters: [gosec]
+        text: "G304"
+      # G304: test helpers open files by constructed path
+      - path: internal/storage/local/local_storage_test.go
+        linters: [gosec]
+        text: "G304"
 
-issues:
-  exclude-rules:
-    - path: cmd/server/main.go
-      linters:
-        - gosec
-      text: "G114"
-    - path: internal/hub/hub.go
-      linters:
-        - errcheck
-      text: "w.Write"
+formatters:
+  enable:
+    - goimports

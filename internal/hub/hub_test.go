@@ -54,7 +54,7 @@ func TestBroadcast_SlowClient_NonBlockingSkip(t *testing.T) {
 		if err == nil {
 			close(connectedCh)
 			// Deliberately do not read resp.Body so the send buffer fills up.
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			<-ctx.Done()
 		}
 	}()
@@ -136,7 +136,7 @@ func TestServeSSE_ClientDisconnect_TriggersCleanup(t *testing.T) {
 
 	// Disconnect the client.
 	cancel()
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// After disconnect, ServeSSE's defer must remove the client from the hub.
 	// Give the server goroutine time to process the cancellation.
