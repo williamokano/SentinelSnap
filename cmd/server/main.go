@@ -56,7 +56,11 @@ func main() {
 	r := router.New(cfg, h, ev)
 
 	addr := fmt.Sprintf(":%d", cfg.HTTPPort)
-	srv := &http.Server{Addr: addr, Handler: r}
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 
 	go func() {
 		log.Printf("listening on %s", addr)
