@@ -18,7 +18,7 @@ import (
 //go:embed static
 var staticFiles embed.FS
 
-func New(cfg *config.Config, h *handler.SnapHandler, ev *hub.Hub) http.Handler {
+func New(cfg *config.Config, h *handler.SnapHandler, ev *hub.Hub, hh *handler.HealthHandler) http.Handler {
 	r := chi.NewRouter()
 	r.Use(securityHeaders(cfg))
 	r.Use(middleware.Logger)
@@ -27,6 +27,8 @@ func New(cfg *config.Config, h *handler.SnapHandler, ev *hub.Hub) http.Handler {
 	if cfg.Debug {
 		r.Use(debugBodyLogger)
 	}
+
+	r.Get("/healthz", hh.Check)
 
 	r.Post("/snaps", h.CreateSnap)
 	r.Get("/snaps", h.ListSnaps)
