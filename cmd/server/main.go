@@ -48,7 +48,8 @@ func main() {
 
 	ev := hub.New()
 	h := handler.NewSnapHandler(repo, store, ev, cfg)
-	r := router.New(cfg, h, ev)
+	hh := handler.NewHealthHandler(db)
+	r := router.New(cfg, h, ev, hh)
 
 	addr := fmt.Sprintf(":%d", cfg.HTTPPort)
 	log.Printf("listening on %s", addr)
