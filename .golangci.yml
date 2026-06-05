@@ -10,7 +10,6 @@ linters:
     - gosec
     - misspell
     - unconvert
-    - goimports
   exclusions:
     rules:
       - path: cmd/server/main.go
@@ -21,3 +20,7 @@ linters:
         linters:
           - errcheck
         text: "w.Write"
+
+formatters:
+  enable:
+    - goimports
