@@ -21,24 +21,33 @@ var staticFiles embed.FS
 func New(cfg *config.Config, h *handler.SnapHandler, ev *hub.Hub, hh *handler.HealthHandler) http.Handler {
 	r := chi.NewRouter()
 	r.Use(securityHeaders(cfg))
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.RequestID)
-	if cfg.Debug {
-		r.Use(debugBodyLogger)
-	}
 
+	// Register healthz before logging middlewares so health checks don't spam logs.
 	r.Get("/healthz", hh.Check)
 
-	r.Post("/snaps", h.CreateSnap)
-	r.Get("/snaps", h.ListSnaps)
-	r.Patch("/snaps/{id}", h.UpdateSnap)
-	r.Delete("/snaps/{id}", h.DeleteSnap)
-	r.Get("/photos/{token}", h.ServePhoto)
-	r.Get("/events", ev.ServeSSE)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.Logger)
+		r.Use(middleware.Recoverer)
+		r.Use(middleware.RequestID)
+		if cfg.Debug {
+			r.Use(debugBodyLogger)
+		}
 
-	staticFS, _ := fs.Sub(staticFiles, "static")
-	r.Handle("/*", http.FileServer(http.FS(staticFS)))
+		r.Post("/snaps", h.CreateSnap)
+		r.Get("/snaps", h.ListSnaps)
+		r.Patch("/snaps/{id}", h.UpdateSnap)
+		r.Delete("/snaps/{id}", h.DeleteSnap)
+		r.Get("/photos/{token}", h.ServePhoto)
+		r.Get("/events", ev.ServeSSE)
+
+		if cfg.StorageBackend == "local" {
+			fileServer := http.FileServer(http.Dir(cfg.LocalUploadDir))
+			r.Handle("/uploads/*", http.StripPrefix("/uploads/", fileServer))
+		}
+
+		staticFS, _ := fs.Sub(staticFiles, "static")
+		r.Handle("/*", http.FileServer(http.FS(staticFS)))
+	})
 
 	return r
 }
