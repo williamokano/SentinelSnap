@@ -8,22 +8,6 @@
   "time": { "from": "now-1h", "to": "now" },
   "timepicker": {},
   "tags": ["sentinelsnap"],
-  "templating": {
-    "list": [
-      {
-        "name": "instance",
-        "type": "query",
-        "label": "Instance",
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "query": "label_values(sentinelsnap_snaps_created_total, instance)",
-        "refresh": 2,
-        "multi": false,
-        "includeAll": true,
-        "allValue": ".*",
-        "current": {}
-      }
-    ]
-  },
   "panels": [
     {
       "id": 1,
@@ -35,8 +19,7 @@
         "defaults": {
           "unit": "reqps",
           "custom": { "lineWidth": 2 }
-        },
-        "overrides": []
+        }
       },
       "options": { "tooltip": { "mode": "multi" } },
       "targets": [
@@ -60,9 +43,9 @@
           "max": 1,
           "custom": { "lineWidth": 2 },
           "color": { "fixedColor": "red", "mode": "fixed" }
-        },
-        "overrides": []
+        }
       },
+      "options": { "tooltip": { "mode": "multi" } },
       "targets": [
         {
           "expr": "sum(rate(http_server_request_duration_seconds_count{job=\"sentinelsnap\",http_response_status_code=~\"5..\"}[2m])) / sum(rate(http_server_request_duration_seconds_count{job=\"sentinelsnap\"}[2m]))",
@@ -81,9 +64,9 @@
         "defaults": {
           "unit": "s",
           "custom": { "lineWidth": 2 }
-        },
-        "overrides": []
+        }
       },
+      "options": { "tooltip": { "mode": "multi" } },
       "targets": [
         {
           "expr": "histogram_quantile(0.99, sum(rate(http_server_request_duration_seconds_bucket{job=\"sentinelsnap\"}[2m])) by (le))",
@@ -108,7 +91,7 @@
       "type": "stat",
       "gridPos": { "x": 0, "y": 8, "w": 4, "h": 4 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "unit": "short" } },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" },
       "targets": [
         {
@@ -128,9 +111,9 @@
         "defaults": {
           "unit": "ops",
           "custom": { "lineWidth": 2 }
-        },
-        "overrides": []
+        }
       },
+      "options": { "tooltip": { "mode": "multi" } },
       "targets": [
         {
           "expr": "rate(sentinelsnap_snaps_created_total{job=\"sentinelsnap\"}[5m])",
@@ -154,9 +137,9 @@
         "defaults": {
           "unit": "Bps",
           "custom": { "lineWidth": 2 }
-        },
-        "overrides": []
+        }
       },
+      "options": { "tooltip": { "mode": "multi" } },
       "targets": [
         {
           "expr": "rate(sentinelsnap_photos_bytes_stored_bytes_total{job=\"sentinelsnap\"}[5m])",
@@ -175,9 +158,9 @@
         "defaults": {
           "unit": "bytes",
           "custom": { "lineWidth": 2 }
-        },
-        "overrides": []
+        }
       },
+      "options": { "tooltip": { "mode": "multi" } },
       "targets": [
         {
           "expr": "histogram_quantile(0.99, sum(rate(sentinelsnap_photo_size_bytes_bucket{job=\"sentinelsnap\"}[10m])) by (le))",
@@ -206,9 +189,9 @@
         "defaults": {
           "unit": "short",
           "custom": { "lineWidth": 2 }
-        },
-        "overrides": []
+        }
       },
+      "options": { "tooltip": { "mode": "multi" } },
       "targets": [
         {
           "expr": "sentinelsnap_sse_clients{job=\"sentinelsnap\"}",
@@ -227,9 +210,9 @@
         "defaults": {
           "unit": "ops",
           "custom": { "lineWidth": 2 }
-        },
-        "overrides": []
+        }
       },
+      "options": { "tooltip": { "mode": "multi" } },
       "targets": [
         {
           "expr": "rate(sentinelsnap_sse_broadcasts_total{job=\"sentinelsnap\"}[2m])",
@@ -248,9 +231,9 @@
         "defaults": {
           "unit": "short",
           "custom": { "lineWidth": 2 }
-        },
-        "overrides": []
+        }
       },
+      "options": { "tooltip": { "mode": "multi" } },
       "targets": [
         {
           "expr": "process_runtime_go_goroutines{job=\"sentinelsnap\"}",
@@ -269,9 +252,9 @@
         "defaults": {
           "unit": "bytes",
           "custom": { "lineWidth": 2 }
-        },
-        "overrides": []
+        }
       },
+      "options": { "tooltip": { "mode": "multi" } },
       "targets": [
         {
           "expr": "process_runtime_go_mem_heap_alloc_bytes{job=\"sentinelsnap\"}",
@@ -300,9 +283,9 @@
         "defaults": {
           "unit": "ns",
           "custom": { "lineWidth": 2 }
-        },
-        "overrides": []
+        }
       },
+      "options": { "tooltip": { "mode": "multi" } },
       "targets": [
         {
           "expr": "histogram_quantile(0.99, sum(rate(process_runtime_go_gc_pause_ns_bucket{job=\"sentinelsnap\"}[5m])) by (le))",
@@ -321,9 +304,9 @@
         "defaults": {
           "unit": "short",
           "custom": { "lineWidth": 2 }
-        },
-        "overrides": []
+        }
       },
+      "options": { "tooltip": { "mode": "multi" } },
       "targets": [
         {
           "expr": "db_client_connections_max{job=\"sentinelsnap\"}",
@@ -352,9 +335,9 @@
         "defaults": {
           "unit": "ops",
           "custom": { "lineWidth": 2 }
-        },
-        "overrides": []
+        }
       },
+      "options": { "tooltip": { "mode": "multi" } },
       "targets": [
         {
           "expr": "rate(db_client_connections_timeouts_total{job=\"sentinelsnap\"}[5m])",
@@ -378,9 +361,9 @@
         "defaults": {
           "unit": "s",
           "custom": { "lineWidth": 2 }
-        },
-        "overrides": []
+        }
       },
+      "options": { "tooltip": { "mode": "multi" } },
       "targets": [
         {
           "expr": "histogram_quantile(0.99, sum(rate(db_client_connections_wait_time_seconds_bucket{job=\"sentinelsnap\"}[5m])) by (le))",

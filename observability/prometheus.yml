@@ -8,7 +8,7 @@ global:
 # which is common when the collector batches before forwarding.
 storage:
   tsdb:
-    out_of_order_time_window: 30m
+    out_of_order_time_window: 2m
 
 scrape_configs:
   # Pull mode: scrape the app's /metrics endpoint directly.
@@ -16,4 +16,3 @@ scrape_configs:
   - job_name: sentinelsnap
     static_configs:
       - targets: ["app:8080"]
-    metrics_path: /metrics

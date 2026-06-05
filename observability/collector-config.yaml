@@ -14,6 +14,7 @@ processors:
   batch:
     timeout: 5s
     send_batch_size: 1024
+    send_batch_max_size: 1024
 
 exporters:
   otlp/tempo:
@@ -23,13 +24,9 @@ exporters:
 
   otlphttp/prometheus:
     endpoint: "http://prometheus:9090/api/v1/otlp"
-    tls:
-      insecure: true
 
   otlphttp/loki:
     endpoint: "http://loki:3100/otlp"
-    tls:
-      insecure: true
 
 service:
   pipelines:

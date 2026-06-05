@@ -61,18 +61,13 @@ services:
       - tempo
       - loki
 
-  # Override the app service to inject OTel env vars when the stack is up.
-  # These values route the app to the collector running in this compose network.
+  # Override the app service to enable OTel and route signals to the collector.
+  # Only non-default values are listed here; see internal/config/config.go for defaults.
   app:
     environment:
       OTEL_ENABLED: "true"
-      OTEL_SERVICE_NAME: "sentinelsnap"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://collector:4317"
-      OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
-      OTEL_METRICS_MODE: "pull"
-      OTEL_TRACES_MODE: "push"
-      OTEL_LOGS_MODE: "stdout"
-      OTEL_TRACES_SAMPLER_ARG: "1.0"
+      OTEL_LOGS_MODE: "push"
     depends_on:
       - collector
 
