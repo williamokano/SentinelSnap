@@ -8,8 +8,9 @@ on:
 
 jobs:
   ci:
-    name: Format, Vet, Lint, Build, Test
+    name: Format, Lint, Build, Test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
@@ -23,9 +24,6 @@ jobs:
 
       - name: Format check
         run: test -z "$(gofmt -l .)"
-
-      - name: Vet
-        run: go vet ./...
 
       - name: Lint
         uses: golangci/golangci-lint-action@v6
