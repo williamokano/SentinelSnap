@@ -26,9 +26,9 @@ func New(cfg *config.Config, h *handler.SnapHandler, ev *hub.Hub, hh *handler.He
 	r.Get("/healthz", hh.Check)
 
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.Logger)
 		r.Use(middleware.Recoverer)
 		r.Use(middleware.RequestID)
+		r.Use(slogRequestLogger)
 		if cfg.Debug {
 			r.Use(debugBodyLogger)
 		}

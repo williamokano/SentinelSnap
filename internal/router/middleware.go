@@ -1,8 +1,11 @@
 package router
 
 import (
+	"log/slog"
 	"net/http"
+	"time"
 
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/williamokano/sentinelsnap/internal/config"
 )
 
@@ -29,4 +32,35 @@ func securityHeaders(cfg *config.Config) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func slogRequestLogger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		reqID := middleware.GetReqID(ctx)
+		t := time.Now()
+		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		defer func() {
+			status := ww.Status()
+			if status == 0 {
+				status = http.StatusOK
+			}
+			logFn := slog.InfoContext
+			if status >= 500 {
+				logFn = slog.ErrorContext
+			} else if status >= 400 {
+				logFn = slog.WarnContext
+			}
+			logFn(ctx, "request",
+				"method", r.Method,
+				"path", r.URL.Path,
+				"status", status,
+				"bytes", ww.BytesWritten(),
+				"duration_ms", time.Since(t).Milliseconds(),
+				"request_id", reqID,
+				"remote_addr", r.RemoteAddr,
+			)
+		}()
+		next.ServeHTTP(ww, r)
+	})
 }
