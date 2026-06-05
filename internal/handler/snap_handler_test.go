@@ -390,4 +390,3 @@ func TestListSnaps_RepoError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	repo.AssertExpectations(t)
 }
-
