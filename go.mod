@@ -21,6 +21,7 @@ require (
 )
 
 require (
+	github.com/XSAM/otelsql v0.42.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -38,6 +39,14 @@ require (
 	github.com/prometheus/procfs v0.20.1 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
+	go.opentelemetry.io/contrib/bridges/otelslog v0.19.0 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc v0.20.0 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp v0.20.0 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.44.0 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.44.0 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.44.0 // indirect
+	go.opentelemetry.io/otel/log v0.20.0 // indirect
+	go.opentelemetry.io/otel/sdk/log v0.20.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect

@@ -11,8 +11,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/XSAM/otelsql"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
+	semconv "go.opentelemetry.io/otel/semconv/v1.30.0"
 
 	"github.com/williamokano/sentinelsnap/internal/config"
 	"github.com/williamokano/sentinelsnap/internal/handler"
@@ -42,12 +44,29 @@ func main() {
 		}
 	}()
 
-	db, err := sqlx.Connect(cfg.DBDriver, cfg.DBDSN)
+	// otelsql wraps the driver to emit DB spans and pool metrics.
+	// The sqlx layer must use the original driver name ("postgres") so that
+	// sqlx keeps $N-style bind vars instead of switching to positional ?.
+	stdDB, err := otelsql.Open(cfg.DBDriver, cfg.DBDSN,
+		otelsql.WithAttributes(semconv.DBSystemNamePostgreSQL),
+	)
 	if err != nil {
-		slog.Error("connect db", "error", err)
+		slog.Error("open db", "error", err)
+		os.Exit(1)
+	}
+	db := sqlx.NewDb(stdDB, "postgres")
+	if err := db.PingContext(ctx); err != nil {
+		slog.Error("ping db", "error", err)
 		os.Exit(1)
 	}
 	defer func() { _ = db.Close() }()
+
+	if _, err := otelsql.RegisterDBStatsMetrics(stdDB,
+		otelsql.WithAttributes(semconv.DBSystemNamePostgreSQL),
+	); err != nil {
+		slog.Error("db stats metrics", "error", err)
+		os.Exit(1)
+	}
 
 	if err := migrate.Run(db); err != nil {
 		slog.Error("migrations", "error", err)
