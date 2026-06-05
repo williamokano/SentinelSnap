@@ -11,14 +11,13 @@ linters:
     - misspell
     - unconvert
     - goimports
-
-exclusions:
-  rules:
-    - path: cmd/server/main.go
-      linters:
-        - gosec
-      text: "G114"
-    - path: internal/hub/hub.go
-      linters:
-        - errcheck
-      text: "w.Write"
+  exclusions:
+    rules:
+      - path: cmd/server/main.go
+        linters:
+          - gosec
+        text: "G114"
+      - path: internal/hub/hub.go
+        linters:
+          - errcheck
+        text: "w.Write"
