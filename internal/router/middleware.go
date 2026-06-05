@@ -9,8 +9,8 @@ import (
 const (
 	cspValue = "default-src 'self'; " +
 		"img-src 'self' data: https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com https://server.arcgisonline.com; " +
-		"script-src 'self' unpkg.com; " +
-		"style-src 'self' unpkg.com"
+		"script-src 'self' https://unpkg.com; " +
+		"style-src 'self' https://unpkg.com"
 )
 
 // securityHeaders returns a middleware that sets security-relevant HTTP response headers.
