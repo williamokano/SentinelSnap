@@ -20,6 +20,7 @@ var staticFiles embed.FS
 
 func New(cfg *config.Config, h *handler.SnapHandler, ev *hub.Hub) http.Handler {
 	r := chi.NewRouter()
+	r.Use(securityHeaders(cfg))
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
