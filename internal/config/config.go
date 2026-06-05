@@ -33,8 +33,8 @@ func Load() (*Config, error) {
 	// Load env file; ENV_FILE overrides the default ".env"
 	_ = godotenv.Load(getEnv("ENV_FILE", ".env"))
 
-	port, _ := strconv.Atoi(getEnv("HTTP_PORT", "8080"))
-	shutdownTimeout, _ := strconv.Atoi(getEnv("SHUTDOWN_TIMEOUT_SECONDS", "30"))
+	port := getEnvInt("HTTP_PORT", 8080)
+	shutdownTimeout := getEnvInt("SHUTDOWN_TIMEOUT_SECONDS", 30)
 	dsn := os.Getenv("DB_DSN")
 	if dsn == "" {
 		return nil, fmt.Errorf("required env var DB_DSN is not set")
@@ -60,6 +60,13 @@ func Load() (*Config, error) {
 
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func getEnvInt(key string, fallback int) int {
+	if v, err := strconv.Atoi(os.Getenv(key)); err == nil {
 		return v
 	}
 	return fallback
