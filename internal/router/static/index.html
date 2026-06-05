@@ -10,7 +10,7 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: system-ui, sans-serif; display: flex; flex-direction: column; height: 100vh; }
-    header { background: #1a1a2e; color: #e0e0e0; padding: 12px 20px; font-size: 1.1rem; font-weight: 600; letter-spacing: 0.05em; }
+    header { background: #1a1a2e; color: #e0e0e0; padding: 12px 20px; font-size: 1.1rem; font-weight: 600; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: space-between; }
     #map { flex: 1; }
     .popup-photos { display: flex; flex-wrap: wrap; gap: 6px; max-width: 280px; margin-top: 8px; }
     .popup-photos img { width: 80px; height: 80px; object-fit: cover; border-radius: 4px; cursor: pointer; }
@@ -31,10 +31,30 @@
     .toast.show { opacity: 1; transform: translateY(0); }
     .toast.toast-danger { background: #6b1a1a; }
     .toast.toast-info { background: #1a3a6b; }
+    .theme-toggle { display: flex; gap: 4px; }
+    .theme-toggle button {
+      background: transparent;
+      border: 1px solid #555;
+      color: #ccc;
+      padding: 4px 10px;
+      font-size: 0.75rem;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .theme-toggle button:hover { background: #2a2a4e; border-color: #888; color: #fff; }
+    .theme-toggle button.active { background: #4a90d9; border-color: #4a90d9; color: #fff; }
   </style>
 </head>
 <body>
-  <header>SentinelSnap</header>
+  <header>
+    <span>SentinelSnap</span>
+    <div class="theme-toggle">
+      <button id="theme-default" class="active" onclick="setTheme('default')">Default</button>
+      <button id="theme-dark" onclick="setTheme('dark')">Dark</button>
+      <button id="theme-satellite" onclick="setTheme('satellite')">Satellite</button>
+    </div>
+  </header>
   <div id="map"></div>
   <div id="lightbox">
     <span id="lightbox-close">&times;</span>
@@ -74,9 +94,46 @@
     }
 
     const map = L.map('map').setView([20, 0], 2);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-    }).addTo(map);
+
+    const TILE_THEMES = {
+      default: {
+        url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        options: {
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }
+      },
+      dark: {
+        url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+        options: {
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+          subdomains: 'abcd',
+          maxZoom: 20
+        }
+      },
+      satellite: {
+        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        options: {
+          attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+          maxZoom: 19
+        }
+      }
+    };
+
+    let currentTileLayer = null;
+
+    function setTheme(name) {
+      if (!TILE_THEMES[name]) return;
+      if (currentTileLayer) map.removeLayer(currentTileLayer);
+      const { url, options } = TILE_THEMES[name];
+      currentTileLayer = L.tileLayer(url, options).addTo(map);
+      localStorage.setItem('mapTheme', name);
+      document.querySelectorAll('.theme-toggle button').forEach(btn => btn.classList.remove('active'));
+      const activeBtn = document.getElementById('theme-' + name);
+      if (activeBtn) activeBtn.classList.add('active');
+    }
+
+    // Restore persisted theme or fall back to default
+    setTheme(localStorage.getItem('mapTheme') || 'default');
 
     const lightbox = document.getElementById('lightbox');
     const lightboxImg = document.getElementById('lightbox-img');
