@@ -33,6 +33,19 @@ func extractAccountID(r *http.Request) (int64, bool) {
 	return id, true
 }
 
+// extractCode decodes a JSON body that contains a single "code" field.
+// It writes a 400 response and returns ("", false) when the body is malformed or the code is empty.
+func extractCode(w http.ResponseWriter, r *http.Request) (string, bool) {
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Code == "" {
+		writeError(w, http.StatusBadRequest, "request body must include a non-empty \"code\" field")
+		return "", false
+	}
+	return body.Code, true
+}
+
 // Setup handles POST /mfa/totp/setup
 func (h *TOTPHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	accountID, ok := extractAccountID(r)
@@ -62,15 +75,12 @@ func (h *TOTPHandler) Confirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var body struct {
-		Code string `json:"code"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Code == "" {
-		writeError(w, http.StatusBadRequest, "request body must include a non-empty \"code\" field")
+	code, ok := extractCode(w, r)
+	if !ok {
 		return
 	}
 
-	result, err := h.svc.Confirm(r.Context(), accountID, body.Code)
+	result, err := h.svc.Confirm(r.Context(), accountID, code)
 	if err != nil {
 		switch {
 		case errors.Is(err, totpsvc.ErrNotFound):
@@ -96,15 +106,12 @@ func (h *TOTPHandler) Verify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var body struct {
-		Code string `json:"code"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Code == "" {
-		writeError(w, http.StatusBadRequest, "request body must include a non-empty \"code\" field")
+	code, ok := extractCode(w, r)
+	if !ok {
 		return
 	}
 
-	if err := h.svc.Verify(r.Context(), accountID, body.Code); err != nil {
+	if err := h.svc.Verify(r.Context(), accountID, code); err != nil {
 		switch {
 		case errors.Is(err, totpsvc.ErrNotFound):
 			writeError(w, http.StatusNotFound, "TOTP not set up for this account")
@@ -129,15 +136,12 @@ func (h *TOTPHandler) Disable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var body struct {
-		Code string `json:"code"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Code == "" {
-		writeError(w, http.StatusBadRequest, "request body must include a non-empty \"code\" field")
+	code, ok := extractCode(w, r)
+	if !ok {
 		return
 	}
 
-	if err := h.svc.Disable(r.Context(), accountID, body.Code); err != nil {
+	if err := h.svc.Disable(r.Context(), accountID, code); err != nil {
 		switch {
 		case errors.Is(err, totpsvc.ErrNotFound):
 			writeError(w, http.StatusNotFound, "TOTP not set up for this account")

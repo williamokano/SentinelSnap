@@ -6,11 +6,13 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -34,17 +36,33 @@ var ErrNotConfirmed = errors.New("totp: not confirmed")
 const backupCodeCount = 8
 const backupCodeLength = 8
 
+// validateOpts are the TOTP validation parameters used for both Confirm and Verify.
+var validateOpts = totp.ValidateOpts{
+	Period:    30,
+	Skew:      1,
+	Digits:    otp.DigitsSix,
+	Algorithm: otp.AlgorithmSHA1,
+}
+
 // Service handles TOTP operations.
 type Service struct {
-	db        *sqlx.DB
-	secretKey []byte // 32-byte AES-256 key derived from app secret
+	db   *sqlx.DB
+	aead cipher.AEAD // AES-256-GCM cipher, initialized once at construction
 }
 
 // New creates a new TOTP Service. appSecret is the application's SECRET_KEY config value.
 func New(db *sqlx.DB, appSecret string) *Service {
 	// Derive a 32-byte key via SHA-256
 	h := sha256.Sum256([]byte(appSecret))
-	return &Service{db: db, secretKey: h[:]}
+	block, err := aes.NewCipher(h[:])
+	if err != nil {
+		panic(fmt.Sprintf("totp: failed to create AES cipher: %v", err))
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		panic(fmt.Sprintf("totp: failed to create GCM: %v", err))
+	}
+	return &Service{db: db, aead: gcm}
 }
 
 // SetupResult is returned by Setup.
@@ -117,12 +135,7 @@ func (s *Service) Confirm(ctx context.Context, accountID int64, code string) (*C
 		return nil, fmt.Errorf("totp decrypt secret: %w", err)
 	}
 
-	valid, err := totp.ValidateCustom(code, rawSecret, time.Now().UTC(), totp.ValidateOpts{
-		Period:    30,
-		Skew:      1,
-		Digits:    otp.DigitsSix,
-		Algorithm: otp.AlgorithmSHA1,
-	})
+	valid, err := totp.ValidateCustom(code, rawSecret, time.Now().UTC(), validateOpts)
 	if err != nil || !valid {
 		return nil, ErrInvalidCode
 	}
@@ -163,12 +176,7 @@ func (s *Service) Verify(ctx context.Context, accountID int64, code string) erro
 		return fmt.Errorf("totp decrypt secret: %w", err)
 	}
 
-	valid, err := totp.ValidateCustom(code, rawSecret, time.Now().UTC(), totp.ValidateOpts{
-		Period:    30,
-		Skew:      1,
-		Digits:    otp.DigitsSix,
-		Algorithm: otp.AlgorithmSHA1,
-	})
+	valid, err := totp.ValidateCustom(code, rawSecret, time.Now().UTC(), validateOpts)
 	if err == nil && valid {
 		return nil
 	}
@@ -211,24 +219,16 @@ func (s *Service) loadSecret(ctx context.Context, accountID int64) (encryptedSec
 }
 
 func isNoRows(err error) bool {
-	return err != nil && err.Error() == "sql: no rows in result set"
+	return errors.Is(err, sql.ErrNoRows)
 }
 
 // encrypt encrypts plaintext using AES-GCM and returns a base64-encoded ciphertext.
 func (s *Service) encrypt(plaintext string) (string, error) {
-	block, err := aes.NewCipher(s.secretKey)
-	if err != nil {
-		return "", err
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", err
-	}
-	nonce := make([]byte, gcm.NonceSize())
+	nonce := make([]byte, s.aead.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return "", err
 	}
-	ciphertext := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+	ciphertext := s.aead.Seal(nonce, nonce, []byte(plaintext), nil)
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
@@ -238,20 +238,12 @@ func (s *Service) decrypt(encoded string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	block, err := aes.NewCipher(s.secretKey)
-	if err != nil {
-		return "", err
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", err
-	}
-	nonceSize := gcm.NonceSize()
+	nonceSize := s.aead.NonceSize()
 	if len(data) < nonceSize {
 		return "", errors.New("totp: ciphertext too short")
 	}
 	nonce, ciphertext := data[:nonceSize], data[nonceSize:]
-	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	plaintext, err := s.aead.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
 		return "", err
 	}
@@ -273,6 +265,7 @@ func randAlphanumeric(length int) (string, error) {
 
 func (s *Service) generateBackupCodes(ctx context.Context, accountID int64) ([]string, error) {
 	plain := make([]string, backupCodeCount)
+	hashes := make([]string, backupCodeCount)
 	for i := range plain {
 		code, err := randAlphanumeric(backupCodeLength)
 		if err != nil {
@@ -284,14 +277,21 @@ func (s *Service) generateBackupCodes(ctx context.Context, accountID int64) ([]s
 		if err != nil {
 			return nil, fmt.Errorf("totp hash backup code: %w", err)
 		}
+		hashes[i] = string(hash)
+	}
 
-		_, err = s.db.ExecContext(ctx,
-			`INSERT INTO account_totp_backup_codes (account_id, code_hash) VALUES ($1, $2)`,
-			accountID, string(hash),
-		)
-		if err != nil {
-			return nil, fmt.Errorf("totp store backup code: %w", err)
-		}
+	// Build a single multi-row INSERT to avoid N round-trips.
+	placeholders := make([]string, backupCodeCount)
+	args := make([]any, 0, 1+backupCodeCount)
+	args = append(args, accountID)
+	for i, h := range hashes {
+		placeholders[i] = fmt.Sprintf("($1, $%d)", i+2)
+		args = append(args, h)
+	}
+	query := `INSERT INTO account_totp_backup_codes (account_id, code_hash) VALUES ` +
+		strings.Join(placeholders, ", ")
+	if _, err := s.db.ExecContext(ctx, query, args...); err != nil {
+		return nil, fmt.Errorf("totp store backup codes: %w", err)
 	}
 	return plain, nil
 }
