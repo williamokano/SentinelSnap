@@ -69,3 +69,43 @@ func TestDelete_RemovesFile(t *testing.T) {
 	_, err = os.Stat(filepath.Join(dir, "snap.jpg"))
 	assert.True(t, os.IsNotExist(err))
 }
+
+func TestGet_MissingFileReturnsError(t *testing.T) {
+	s, err := local.New(t.TempDir())
+	require.NoError(t, err)
+
+	rc, _, err := s.Get(context.Background(), "nonexistent.jpg")
+	assert.Error(t, err)
+	assert.Nil(t, rc)
+}
+
+func TestDelete_MissingFileReturnsError(t *testing.T) {
+	s, err := local.New(t.TempDir())
+	require.NoError(t, err)
+
+	err = s.Delete(context.Background(), "ghost.jpg")
+	assert.Error(t, err)
+}
+
+func TestDelete_NestedDirCleanup(t *testing.T) {
+	dir := t.TempDir()
+	s, err := local.New(dir)
+	require.NoError(t, err)
+
+	// Put a file in a nested directory.
+	require.NoError(t, s.Put(context.Background(), "photos/token123.jpg", strings.NewReader("data"), "image/jpeg"))
+
+	nestedDir := filepath.Join(dir, "photos")
+	_, statErr := os.Stat(nestedDir)
+	require.NoError(t, statErr, "nested directory should exist after Put")
+
+	// Delete the file — the implementation also attempts to remove the parent dir.
+	require.NoError(t, s.Delete(context.Background(), "photos/token123.jpg"))
+
+	_, err = os.Stat(filepath.Join(dir, "photos", "token123.jpg"))
+	assert.True(t, os.IsNotExist(err), "file should be removed")
+
+	// The parent directory should also have been cleaned up (best-effort).
+	_, err = os.Stat(nestedDir)
+	assert.True(t, os.IsNotExist(err), "empty parent directory should be removed after delete")
+}
