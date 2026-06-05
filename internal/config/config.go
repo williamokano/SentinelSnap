@@ -9,8 +9,9 @@ import (
 )
 
 type Config struct {
-	HTTPPort int
-	Debug    bool
+	HTTPPort     int
+	Debug        bool
+	HTTPSEnabled bool
 
 	DBDriver string
 	DBDSN    string
@@ -36,9 +37,11 @@ func Load() (*Config, error) {
 	if dsn == "" {
 		return nil, fmt.Errorf("required env var DB_DSN is not set")
 	}
+	httpsEnabled, _ := strconv.ParseBool(os.Getenv("HTTPS_ENABLED"))
 	return &Config{
 		HTTPPort:       port,
 		Debug:          os.Getenv("DEBUG") == "true" || os.Getenv("DEBUG") == "1",
+		HTTPSEnabled:   httpsEnabled,
 		DBDriver:       getEnv("DB_DRIVER", "postgres"),
 		DBDSN:          dsn,
 		StorageBackend: getEnv("STORAGE_BACKEND", "local"),
