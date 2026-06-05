@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
@@ -33,37 +34,36 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	obs, err := observability.Setup(ctx, observability.FromAppConfig(cfg))
 	if err != nil {
 		log.Fatalf("observability: %v", err)
 	}
-	defer func() {
-		if err := obs.Shutdown(ctx); err != nil {
-			slog.Error("observability shutdown", "error", err)
-		}
-	}()
 
-	// otelsql wraps the driver to emit DB spans and pool metrics.
-	// The sqlx layer must use the original driver name ("postgres") so that
-	// sqlx keeps $N-style bind vars instead of switching to positional ?.
+	// otelsql registers a wrapped driver under a generated name and returns a
+	// *sql.DB bound to it. sqlx.NewDb is passed the original "postgres" name so
+	// that sqlx resolves the DOLLAR bind-var style ($1, $2, …). Using the
+	// otelsql-generated driver name would cause sqlx to fall back to ?
+	// placeholders, breaking all parameterised queries.
 	stdDB, err := otelsql.Open(cfg.DBDriver, cfg.DBDSN,
 		otelsql.WithAttributes(semconv.DBSystemNamePostgreSQL),
 	)
 	if err != nil {
-		slog.Error("open db", "error", err)
+		slog.Error("open db", "driver", cfg.DBDriver, "error", err)
 		os.Exit(1)
 	}
 	db := sqlx.NewDb(stdDB, "postgres")
 	if err := db.PingContext(ctx); err != nil {
-		slog.Error("ping db", "error", err)
+		slog.Error("ping db", "driver", cfg.DBDriver, "error", err)
 		os.Exit(1)
 	}
-	defer func() { _ = db.Close() }()
 
-	if _, err := otelsql.RegisterDBStatsMetrics(stdDB,
+	dbStatsReg, err := otelsql.RegisterDBStatsMetrics(stdDB,
 		otelsql.WithAttributes(semconv.DBSystemNamePostgreSQL),
-	); err != nil {
+	)
+	if err != nil {
 		slog.Error("db stats metrics", "error", err)
 		os.Exit(1)
 	}
@@ -93,33 +93,40 @@ func main() {
 	hh := handler.NewHealthHandler(db)
 	r := router.New(cfg, h, ev, hh, obs.MetricsHandler)
 
-	addr := fmt.Sprintf(":%d", cfg.HTTPPort)
 	srv := &http.Server{
-		Addr:              addr,
+		Addr:              fmt.Sprintf(":%d", cfg.HTTPPort),
 		Handler:           obs.WrapHandler(r),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
+	slog.Info("listening", "addr", srv.Addr)
 	go func() {
-		slog.Info("listening", "addr", addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("serve", "error", err)
 			os.Exit(1)
 		}
 	}()
 
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	slog.Info("shutting down", "timeout_seconds", cfg.ShutdownTimeoutSeconds)
+	<-ctx.Done()
+	slog.Info("shutting down")
 
-	timeout := time.Duration(cfg.ShutdownTimeoutSeconds) * time.Second
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		slog.Error("shutdown error", "error", err)
+		slog.Error("http server shutdown", "error", err)
+	}
+	if err := dbStatsReg.Unregister(); err != nil {
+		slog.Error("db stats unregister", "error", err)
+	}
+	if err := db.Close(); err != nil {
+		slog.Error("db close", "error", err)
 	}
 	ev.Close()
+	// Use stdlib log: slog may route through the OTLP push logger whose
+	// provider is about to be (or already is) shut down.
+	if err := obs.Shutdown(shutdownCtx); err != nil {
+		log.Printf("observability shutdown: %v", err)
+	}
 	slog.Info("server stopped")
 }

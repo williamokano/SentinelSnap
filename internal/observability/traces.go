@@ -12,7 +12,9 @@ import (
 )
 
 // newTracerProvider builds a TracerProvider according to cfg.TracesMode.
-// Push mode: sends spans to cfg.OTLPEndpoint via batch processor.
+// Push mode: sends spans to cfg.OTLPEndpoint via batch processor. Sampler uses
+// TraceIDRatioBased for root spans; child spans honour the parent's sampling
+// decision (ParentBased wrapper). Set TraceSampleRate=1.0 to always follow parent.
 // Off mode: returns a no-op provider (spans are still created but not exported).
 func newTracerProvider(ctx context.Context, res *resource.Resource, cfg Config) (*sdktrace.TracerProvider, error) {
 	if cfg.TracesMode == ModeOff {

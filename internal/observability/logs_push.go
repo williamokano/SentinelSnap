@@ -1,5 +1,6 @@
-// This file uses the OTel logs SDK which is currently in beta. All beta imports
-// are isolated here so a future API break is contained to a single file.
+// This file imports the OTel logs SDK (sdk/log v0.x) whose API is not yet
+// covered by the OpenTelemetry Go stability guarantee. Isolating it here limits
+// the blast radius of a future breaking change.
 package observability
 
 import (
@@ -38,9 +39,10 @@ func newLogProvider(ctx context.Context, res *resource.Resource, cfg Config) (*s
 }
 
 // newPushLogger returns an slog.Logger that ships records to lp via the OTel
-// slog bridge. This replaces the stdout logger when LogsMode is "push".
-// level is respected by wrapping the bridge in a LevelHandler so only
-// records at or above the configured threshold are forwarded.
+// slog bridge. This replaces the stdout logger when LogsMode is "push"; no
+// records are written to stdout in push mode. level is respected by wrapping
+// the bridge in a `levelHandler` so only records at or above the configured
+// threshold are forwarded.
 func newPushLogger(lp *sdklog.LoggerProvider, level slog.Level) *slog.Logger {
 	bridge := otelslog.NewHandler("sentinelsnap",
 		otelslog.WithLoggerProvider(lp),

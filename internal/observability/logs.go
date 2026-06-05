@@ -25,8 +25,9 @@ func newLogger(cfg Config) (*slog.Logger, slog.Level, error) {
 	return slog.New(&traceHandler{Handler: base}), level, nil
 }
 
-// traceHandler wraps a slog.Handler and adds trace_id/span_id from the OTel
-// span in context whenever a valid span is present.
+// traceHandler wraps a slog.Handler and injects "trace_id" and "span_id"
+// attributes from the active OTel span, appended after any existing record
+// attributes. When there is no valid span in ctx the handler delegates unchanged.
 type traceHandler struct {
 	slog.Handler
 }
@@ -62,6 +63,9 @@ func (h *levelHandler) Enabled(_ context.Context, level slog.Level) bool {
 }
 
 func (h *levelHandler) Handle(ctx context.Context, rec slog.Record) error {
+	if !h.Enabled(ctx, rec.Level) {
+		return nil
+	}
 	return h.inner.Handle(ctx, rec)
 }
 

@@ -76,6 +76,9 @@ func (c Config) Validate() error {
 	if c.TraceSampleRate < 0 || c.TraceSampleRate > 1 {
 		return fmt.Errorf("OTEL_TRACES_SAMPLER_ARG %v out of [0.0, 1.0]", c.TraceSampleRate)
 	}
+	if c.Enabled && c.OTLPEndpoint == "" && (c.MetricsMode == ModePush || c.TracesMode == ModePush || c.LogsMode == ModePush) {
+		return fmt.Errorf("OTEL_EXPORTER_OTLP_ENDPOINT must be set when any signal uses push mode")
+	}
 	return nil
 }
 
@@ -158,6 +161,12 @@ func Setup(ctx context.Context, cfg Config) (Result, error) {
 		))
 	}
 
+	slog.Info("observability configured",
+		"metrics_mode", cfg.MetricsMode,
+		"traces_mode", cfg.TracesMode,
+		"logs_mode", cfg.LogsMode,
+	)
+
 	shutdowns := []func(context.Context) error{mp.Shutdown, tp.Shutdown}
 
 	if cfg.LogsMode == ModePush {
@@ -169,10 +178,11 @@ func Setup(ctx context.Context, cfg Config) (Result, error) {
 		shutdowns = append(shutdowns, lp.Shutdown)
 	}
 
+	finalShutdowns := shutdowns
 	shutdown := func(ctx context.Context) error {
 		var errs []error
-		for i := len(shutdowns) - 1; i >= 0; i-- {
-			if err := shutdowns[i](ctx); err != nil {
+		for i := len(finalShutdowns) - 1; i >= 0; i-- {
+			if err := finalShutdowns[i](ctx); err != nil {
 				errs = append(errs, err)
 			}
 		}
