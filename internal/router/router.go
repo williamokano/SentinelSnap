@@ -5,7 +5,7 @@ import (
 	"embed"
 	"io"
 	"io/fs"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -56,12 +56,14 @@ func debugBodyLogger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
-			log.Printf("[DEBUG] %s %s — failed to read body: %v", r.Method, r.URL.Path, err)
+			slog.DebugContext(r.Context(), "debug: failed to read body",
+				"method", r.Method, "path", r.URL.Path, "error", err)
 			next.ServeHTTP(w, r)
 			return
 		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
-		log.Printf("[DEBUG] %s %s — body: %s", r.Method, r.URL.Path, body)
+		slog.DebugContext(r.Context(), "debug: request body",
+			"method", r.Method, "path", r.URL.Path, "body", string(body))
 		next.ServeHTTP(w, r)
 	})
 }

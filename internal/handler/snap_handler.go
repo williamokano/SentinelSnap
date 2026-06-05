@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -167,7 +167,7 @@ func (h *SnapHandler) ServePhoto(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", ct)
 	if _, err := io.Copy(w, rc); err != nil {
-		log.Printf("warning: failed to stream photo %q: %v", token, err)
+		slog.WarnContext(r.Context(), "failed to stream photo", "token", token, "error", err)
 	}
 }
 
@@ -222,7 +222,7 @@ func (h *SnapHandler) DeleteSnap(w http.ResponseWriter, r *http.Request) {
 
 	for _, p := range snap.Photos {
 		if err := h.storage.Delete(r.Context(), p.StoredKey); err != nil {
-			log.Printf("warning: failed to delete stored file %q: %v", p.StoredKey, err)
+			slog.WarnContext(r.Context(), "failed to delete stored file", "key", p.StoredKey, "error", err)
 		}
 	}
 
