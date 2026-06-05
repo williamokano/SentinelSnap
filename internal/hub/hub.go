@@ -41,6 +41,17 @@ func (h *Hub) Broadcast(eventType string, payload any) {
 	}
 }
 
+// Close closes all active SSE client channels so that ServeSSE handlers
+// return promptly and browsers see EOF, allowing them to reconnect.
+func (h *Hub) Close() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for ch := range h.clients {
+		close(ch)
+		delete(h.clients, ch)
+	}
+}
+
 func (h *Hub) ServeSSE(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -66,7 +77,10 @@ func (h *Hub) ServeSSE(w http.ResponseWriter, r *http.Request) {
 
 	for {
 		select {
-		case msg := <-ch:
+		case msg, ok := <-ch:
+			if !ok {
+				return
+			}
 			w.Write(msg)
 			flusher.Flush()
 		case <-r.Context().Done():
