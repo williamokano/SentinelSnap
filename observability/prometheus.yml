@@ -2,10 +2,9 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
-# Allow Prometheus to receive OTLP push from the collector (push metrics mode).
-# Enable with --web.enable-otlp-receiver on the Prometheus command line.
-# out_of_order_time_window accepts samples arriving slightly out of order,
-# which is common when the collector batches before forwarding.
+# --web.enable-otlp-receiver is already set in docker-compose.observability.yml.
+# out_of_order_time_window covers the collector's batch flush window so
+# push-mode samples arriving slightly late are accepted rather than rejected.
 storage:
   tsdb:
     out_of_order_time_window: 2m

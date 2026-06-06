@@ -1,13 +1,12 @@
 services:
-  # OTel Collector: receives OTLP from the app, fans out to Tempo / Prometheus / Loki.
   collector:
     image: otel/opentelemetry-collector-contrib:0.119.0
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
     volumes:
       - ./observability/collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
     ports:
-      - "4317:4317"   # OTLP gRPC
-      - "4318:4318"   # OTLP HTTP
+      - "4317:4317"
+      - "4318:4318"
     depends_on:
       - prometheus
       - tempo
@@ -33,7 +32,7 @@ services:
       - ./observability/tempo.yaml:/etc/tempo.yaml:ro
       - tempo_data:/var/tempo
     ports:
-      - "3200:3200"   # Tempo HTTP (Grafana queries here)
+      - "3200:3200"
 
   loki:
     image: grafana/loki:3.3.0

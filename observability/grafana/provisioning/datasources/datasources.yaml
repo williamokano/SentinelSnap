@@ -26,13 +26,6 @@ datasources:
         tags:
           - key: service.name
             value: service_name
-      tracesToMetrics:
-        datasourceUid: prometheus
-        tags:
-          - key: service.name
-            value: job
-      serviceMap:
-        datasourceUid: prometheus
       nodeGraph:
         enabled: true
       lokiSearch:
@@ -47,4 +40,5 @@ datasources:
       derivedFields:
         - name: trace_id
           matcherRegex: '"trace_id":"([^"]+)"'
+          url: "${__value.raw}"
           datasourceUid: tempo

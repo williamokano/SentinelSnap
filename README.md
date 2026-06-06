@@ -105,12 +105,15 @@ SentinelSnap ships with a full observability stack (structured logs, metrics, di
 
 ### Quick start
 
+Ensure you have a `.env` file with at minimum `DB_DSN`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` set (see step 1 of [Running with Docker Compose](#running-with-docker-compose)).
+
 ```bash
-# Bring up the app + the full Grafana/Prometheus/Tempo/Loki stack:
 docker compose -f docker-compose.yml -f docker-compose.observability.yml --profile app up -d
 ```
 
 Open Grafana at **http://localhost:3000** — the SentinelSnap dashboard is pre-provisioned.
+
+The observability compose file enables `OTEL_ENABLED=true`, metrics in pull mode (Prometheus scrapes `/metrics`), traces pushed to Tempo, and logs pushed to Loki.
 
 ### Signal modes
 
@@ -138,7 +141,7 @@ Config files live in `observability/`. The compose file mounts them read-only.
 
 **Pull (default):** Prometheus scrapes `/metrics` directly from the app. The OTel Collector is not involved for metrics.
 
-**Push:** Set `OTEL_METRICS_MODE=push` and `OTEL_ENABLED=true`. The app sends metrics to the collector via OTLP, which forwards to Prometheus using the OTLP write receiver (`--web.enable-otlp-receiver`).
+**Push:** Set `OTEL_METRICS_MODE=push` and `OTEL_ENABLED=true`. The app sends metrics to the collector via OTLP, which forwards to Prometheus using the OTLP write receiver (already enabled in `docker-compose.observability.yml`).
 
 ### Trace–log correlation
 
@@ -146,7 +149,7 @@ When `OTEL_LOGS_MODE=push`, log records carry `trace_id` and `span_id` fields. G
 
 ### OTel stability note
 
-The log-push path (`sdk/log`, `otlplog*`, `otelslog` bridge) is **pre-1.0 / beta** as of OTel Go v1.44. It is isolated in `internal/observability/logs_push.go`. The default (`OTEL_LOGS_MODE=stdout`) uses only stable packages.
+The log-push path (`sdk/log`, `otlplog*`, `otelslog` bridge) is **pre-1.0 / beta** (`go.opentelemetry.io/otel/sdk/log v0.20.0`). It is isolated in `internal/observability/logs_push.go`. The default (`OTEL_LOGS_MODE=stdout`) uses only stable packages.
 
 ---
 
