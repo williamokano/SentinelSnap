@@ -99,6 +99,60 @@ http://localhost:8080
 
 ---
 
+## Observability
+
+SentinelSnap ships with a full observability stack (structured logs, metrics, distributed traces) built on **OpenTelemetry**.
+
+### Quick start
+
+Ensure you have a `.env` file with at minimum `DB_DSN`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` set (see step 1 of [Running with Docker Compose](#running-with-docker-compose)).
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.observability.yml --profile app up -d
+```
+
+Open Grafana at **http://localhost:3000** — the SentinelSnap dashboard is pre-provisioned.
+
+The observability compose file enables `OTEL_ENABLED=true`, metrics in pull mode (Prometheus scrapes `/metrics`), traces pushed to Tempo, and logs pushed to Loki.
+
+### Signal modes
+
+| Signal | Default mode | Options |
+|---|---|---|
+| Metrics | `pull` — app exposes `/metrics`, Prometheus scrapes it | `pull` \| `push` (OTLP to collector) \| `off` |
+| Traces | `push` — sent via OTLP to the collector → Tempo | `push` \| `off` |
+| Logs | `stdout` — structured JSON to stdout | `stdout` \| `push` (OTLP to collector → Loki) |
+
+All signals are gated behind `OTEL_ENABLED=true`. Setting it to `false` (the default) runs the app with zero OTel overhead while still emitting structured JSON logs.
+
+### Stack components
+
+| Service | Image | Port | Purpose |
+|---|---|---|---|
+| OTel Collector | `otel/opentelemetry-collector-contrib:0.119.0` | 4317/4318 | Receives OTLP; fans out to Tempo, Prometheus, Loki |
+| Prometheus | `prom/prometheus:v3.1.0` | 9090 | Metrics store; scrapes `/metrics` in pull mode |
+| Tempo | `grafana/tempo:2.7.0` | 3200 | Trace backend |
+| Loki | `grafana/loki:3.3.0` | 3100 | Log aggregation |
+| Grafana | `grafana/grafana:11.4.0` | 3000 | Dashboards, datasource correlations |
+
+Config files live in `observability/`. The compose file mounts them read-only.
+
+### Switching between pull and push metrics
+
+**Pull (default):** Prometheus scrapes `/metrics` directly from the app. The OTel Collector is not involved for metrics.
+
+**Push:** Set `OTEL_METRICS_MODE=push` and `OTEL_ENABLED=true`. The app sends metrics to the collector via OTLP, which forwards to Prometheus using the OTLP write receiver (already enabled in `docker-compose.observability.yml`).
+
+### Trace–log correlation
+
+When `OTEL_LOGS_MODE=push`, log records carry `trace_id` and `span_id` fields. Grafana's Loki datasource is pre-configured with a derived field that links `trace_id` values to Tempo, so you can jump from a log line to the full trace in one click.
+
+### OTel stability note
+
+The log-push path (`sdk/log`, `otlplog*`, `otelslog` bridge) is **pre-1.0 / beta** (`go.opentelemetry.io/otel/sdk/log v0.20.0`). It is isolated in `internal/observability/logs_push.go`. The default (`OTEL_LOGS_MODE=stdout`) uses only stable packages.
+
+---
+
 ## Environment variables
 
 All variables can be set in a `.env` file (loaded automatically at startup) or passed as regular environment variables. Use `ENV_FILE=path/to/file` to load a different file.
@@ -115,6 +169,16 @@ All variables can be set in a `.env` file (loaded automatically at startup) or p
 | `LOCAL_UPLOAD_DIR` | `./uploads` | Directory where photos are saved |
 | `ENV_FILE` | `.env` | Path to the env file to load |
 | `DEBUG` | `false` | Log full request bodies |
+| `LOG_LEVEL` | `info` | Log verbosity: `debug` \| `info` \| `warn` \| `error` |
+| `LOG_FORMAT` | `json` | Log format: `json` \| `text` |
+| `OTEL_ENABLED` | `false` | Master switch for metrics/traces/log-push |
+| `OTEL_SERVICE_NAME` | `sentinelsnap` | OTel `service.name` resource attribute |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | Collector endpoint (used when any signal is in push mode) |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` | OTLP protocol: `grpc` \| `http/protobuf` |
+| `OTEL_METRICS_MODE` | `pull` | Metrics mode: `pull` \| `push` \| `off` |
+| `OTEL_TRACES_MODE` | `push` | Traces mode: `push` \| `off` |
+| `OTEL_LOGS_MODE` | `stdout` | Logs mode: `stdout` \| `push` |
+| `OTEL_TRACES_SAMPLER_ARG` | `1.0` | Trace sample ratio `[0.0–1.0]` |
 
 S3 support (`S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`) is wired in the config but not yet implemented in the storage layer.
 

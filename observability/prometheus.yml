@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# --web.enable-otlp-receiver is already set in docker-compose.observability.yml.
+# out_of_order_time_window covers the collector's batch flush window so
+# push-mode samples arriving slightly late are accepted rather than rejected.
+storage:
+  tsdb:
+    out_of_order_time_window: 2m
+
+scrape_configs:
+  # Pull mode: scrape the app's /metrics endpoint directly.
+  # Disable this job (or set OTEL_METRICS_MODE=push) when using push mode.
+  - job_name: sentinelsnap
+    static_configs:
+      - targets: ["app:8080"]
