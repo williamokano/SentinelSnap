@@ -23,7 +23,7 @@ import (
 )
 
 func newHandler(repo *repoMock.SnapRepository, store *storageMock.StorageProvider) *handler.SnapHandler {
-	return handler.NewSnapHandler(repo, store, hub.New(), &config.Config{})
+	return handler.NewSnapHandler(repo, store, hub.New(), &config.Config{}, nil)
 }
 
 func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }

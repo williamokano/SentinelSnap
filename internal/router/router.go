@@ -3,6 +3,7 @@ package router
 import (
 	"bytes"
 	"embed"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -18,12 +19,25 @@ import (
 //go:embed static
 var staticFiles embed.FS
 
-func New(cfg *config.Config, h *handler.SnapHandler, ev *hub.Hub, hh *handler.HealthHandler) http.Handler {
+// New builds the HTTP router. metricsHandler, when non-nil, is mounted at /metrics
+// outside the logging group so scraper traffic does not pollute request logs.
+func New(cfg *config.Config, h *handler.SnapHandler, ev *hub.Hub, hh *handler.HealthHandler, metricsHandler http.Handler) http.Handler {
 	r := chi.NewRouter()
 	r.Use(securityHeaders(cfg))
 
 	// Register healthz before logging middlewares so health checks don't spam logs.
 	r.Get("/healthz", hh.Check)
+
+	if metricsHandler != nil {
+		r.Handle("/metrics", metricsHandler)
+	}
+
+	staticFS, err := fs.Sub(staticFiles, "static")
+	if err != nil {
+		// Should never happen: the "static" directory is verified at compile time
+		// by the //go:embed directive. Fail fast rather than serving 500s at runtime.
+		panic(fmt.Sprintf("router: embedded static FS unavailable: %v", err))
+	}
 
 	r.Group(func(r chi.Router) {
 		// Order matters: RequestID before the logger so request_id is loggable,
@@ -32,6 +46,7 @@ func New(cfg *config.Config, h *handler.SnapHandler, ev *hub.Hub, hh *handler.He
 		r.Use(middleware.RequestID)
 		r.Use(slogRequestLogger)
 		r.Use(middleware.Recoverer)
+		r.Use(routeTagger)
 		if cfg.Debug {
 			r.Use(debugBodyLogger)
 		}
@@ -48,7 +63,6 @@ func New(cfg *config.Config, h *handler.SnapHandler, ev *hub.Hub, hh *handler.He
 			r.Handle("/uploads/*", http.StripPrefix("/uploads/", fileServer))
 		}
 
-		staticFS, _ := fs.Sub(staticFiles, "static")
 		r.Handle("/*", http.FileServer(http.FS(staticFS)))
 	})
 

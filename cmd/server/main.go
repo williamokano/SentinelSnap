@@ -13,6 +13,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
+
 	"github.com/williamokano/sentinelsnap/internal/config"
 	"github.com/williamokano/sentinelsnap/internal/handler"
 	"github.com/williamokano/sentinelsnap/internal/hub"
@@ -31,12 +32,12 @@ func main() {
 	}
 
 	ctx := context.Background()
-	obsShutdown, err := observability.Setup(ctx, observability.FromAppConfig(cfg))
+	obs, err := observability.Setup(ctx, observability.FromAppConfig(cfg))
 	if err != nil {
 		log.Fatalf("observability: %v", err)
 	}
 	defer func() {
-		if err := obsShutdown(ctx); err != nil {
+		if err := obs.Shutdown(ctx); err != nil {
 			slog.Error("observability shutdown", "error", err)
 		}
 	}()
@@ -69,14 +70,14 @@ func main() {
 	}
 
 	ev := hub.New()
-	h := handler.NewSnapHandler(repo, store, ev, cfg)
+	h := handler.NewSnapHandler(repo, store, ev, cfg, obs.AppMetrics)
 	hh := handler.NewHealthHandler(db)
-	r := router.New(cfg, h, ev, hh)
+	r := router.New(cfg, h, ev, hh, obs.MetricsHandler)
 
 	addr := fmt.Sprintf(":%d", cfg.HTTPPort)
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           r,
+		Handler:           obs.WrapHandler(r),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

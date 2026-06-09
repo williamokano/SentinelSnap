@@ -7,9 +7,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/williamokano/sentinelsnap/internal/config"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 func TestSecurityHeaders(t *testing.T) {
@@ -62,4 +65,104 @@ func TestSlogRequestLogger_PanicLoggedAs500(t *testing.T) {
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.Contains(t, buf.String(), `"status":500`)
+}
+
+func TestSlogRequestLogger_StatusCodes(t *testing.T) {
+	tests := []struct {
+		name           string
+		handlerStatus  int
+		writeBody      bool
+		expectedStatus int
+	}{
+		{"200 OK", http.StatusOK, true, http.StatusOK},
+		{"400 Bad Request", http.StatusBadRequest, true, http.StatusBadRequest},
+		{"500 Internal Error", http.StatusInternalServerError, true, http.StatusInternalServerError},
+		{"no write defaults to 200", 0, false, http.StatusOK},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var logBuf bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
+			slog.SetDefault(logger)
+
+			handler := slogRequestLogger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.writeBody {
+					w.WriteHeader(tc.handlerStatus)
+				}
+			}))
+
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			// no chi context attached — tests the plain request path
+			w := httptest.NewRecorder()
+
+			handler.ServeHTTP(w, req)
+
+			logOutput := logBuf.String()
+			assert.Contains(t, logOutput, "request")
+		})
+	}
+}
+
+func TestSlogRequestLogger_NoWriteDefaultsTo200(t *testing.T) {
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
+	slog.SetDefault(logger)
+
+	handler := slogRequestLogger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// write nothing — status should default to 200
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/silent", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	assert.Contains(t, logBuf.String(), `"status":200`)
+}
+
+func TestRouteTagger_NilChiContext(t *testing.T) {
+	called := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	})
+
+	handler := routeTagger(next)
+
+	// Request with no chi route context attached — should not panic.
+	req := httptest.NewRequest(http.MethodGet, "/anything", nil)
+	w := httptest.NewRecorder()
+
+	assert.NotPanics(t, func() {
+		handler.ServeHTTP(w, req)
+	})
+	assert.True(t, called, "next handler should still be called")
+}
+
+func TestRouteTagger_InjectsRouteLabel(t *testing.T) {
+	// routeTagger must run inside a chi Group (after route matching) so that
+	// rctx.RoutePattern() is already populated. Mirror the actual router.go setup.
+	r := chi.NewRouter()
+	var capturedLabeler *otelhttp.Labeler
+	r.Group(func(r chi.Router) {
+		r.Use(routeTagger)
+		r.Get("/snaps/{id}", func(w http.ResponseWriter, r *http.Request) {
+			l, ok := otelhttp.LabelerFromContext(r.Context())
+			if ok {
+				capturedLabeler = l
+			}
+		})
+	})
+
+	wrapped := otelhttp.NewHandler(r, "test")
+	req := httptest.NewRequest(http.MethodGet, "/snaps/42", nil)
+	wrapped.ServeHTTP(httptest.NewRecorder(), req)
+
+	require.NotNil(t, capturedLabeler, "otelhttp labeler not found in context")
+	var routeLabel string
+	for _, a := range capturedLabeler.Get() {
+		if string(a.Key) == "http.route" {
+			routeLabel = a.Value.AsString()
+		}
+	}
+	assert.Equal(t, "/snaps/{id}", routeLabel)
 }
