@@ -91,6 +91,42 @@ func TestConfigValidate(t *testing.T) {
 	})
 }
 
+func TestConfigValidate_OTLPEndpointRequired(t *testing.T) {
+	base := Config{
+		LogLevel:        "info",
+		LogFormat:       "json",
+		Enabled:         true,
+		TraceSampleRate: 1.0,
+		LogsMode:        ModeStdout,
+	}
+	for _, mode := range []struct {
+		name        string
+		metricsMode string
+		tracesMode  string
+	}{
+		{"push metrics", ModePush, ModeOff},
+		{"push traces", ModeOff, ModePush},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			c := base
+			c.MetricsMode = mode.metricsMode
+			c.TracesMode = mode.tracesMode
+			c.OTLPEndpoint = ""
+			assert.ErrorContains(t, c.Validate(), "OTEL_EXPORTER_OTLP_ENDPOINT")
+		})
+	}
+
+	// When disabled, no endpoint is required even in push mode.
+	t.Run("disabled skips endpoint check", func(t *testing.T) {
+		c := base
+		c.Enabled = false
+		c.MetricsMode = ModePush
+		c.TracesMode = ModePush
+		c.OTLPEndpoint = ""
+		assert.NoError(t, c.Validate())
+	})
+}
+
 func TestAppMetrics_NilSafe(t *testing.T) {
 	ctx := context.Background()
 	var am *AppMetrics

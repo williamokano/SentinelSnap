@@ -2,12 +2,15 @@ package observability
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	nooptrace "go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/williamokano/sentinelsnap/internal/config"
 )
@@ -21,9 +24,6 @@ const (
 )
 
 // Config holds all observability configuration.
-// Logging fields (LogLevel, LogFormat) are active in Phase 1.
-// OTel exporter fields are populated from the application config and consumed
-// by their respective providers (metrics in Phase 2, traces and log-push in Phase 3).
 type Config struct {
 	// Logging
 	LogLevel  string
@@ -77,6 +77,9 @@ func (c Config) Validate() error {
 	if c.TraceSampleRate < 0 || c.TraceSampleRate > 1 {
 		return fmt.Errorf("OTEL_TRACES_SAMPLER_ARG %v out of [0.0, 1.0]", c.TraceSampleRate)
 	}
+	if c.Enabled && c.OTLPEndpoint == "" && (c.MetricsMode == ModePush || c.TracesMode == ModePush || c.LogsMode == ModePush) {
+		return fmt.Errorf("OTEL_EXPORTER_OTLP_ENDPOINT must be set when any signal uses push mode")
+	}
 	return nil
 }
 
@@ -100,10 +103,10 @@ func FromAppConfig(cfg *config.Config) Config {
 // Setup initialises all enabled observability signals, installs providers as
 // OTel globals, and sets the structured slog logger as the process default.
 // Returns a Result with a shutdown func, an optional /metrics handler, and app
-// metrics instruments. LOG_LEVEL/LOG_FORMAT are always applied; OTel metrics
+// metrics instruments. LOG_LEVEL/LOG_FORMAT are always applied; OTel signals
 // are enabled when OTEL_ENABLED=true.
 func Setup(ctx context.Context, cfg Config) (Result, error) {
-	logger, err := newLogger(cfg)
+	logger, level, err := newLogger(cfg)
 	if err != nil {
 		return Result{}, err
 	}
@@ -147,8 +150,53 @@ func Setup(ctx context.Context, cfg Config) (Result, error) {
 		return Result{}, err
 	}
 
+	var tpShutdown func(context.Context) error
+	if cfg.TracesMode == ModeOff {
+		otel.SetTracerProvider(nooptrace.NewTracerProvider())
+		tpShutdown = func(context.Context) error { return nil }
+	} else {
+		tp, err := newTracerProvider(ctx, res, cfg)
+		if err != nil {
+			return Result{}, err
+		}
+		otel.SetTracerProvider(tp)
+		otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+			propagation.TraceContext{},
+			propagation.Baggage{},
+		))
+		tpShutdown = tp.Shutdown
+	}
+
+	slog.Info("observability configured",
+		"metrics_mode", cfg.MetricsMode,
+		"traces_mode", cfg.TracesMode,
+		"logs_mode", cfg.LogsMode,
+	)
+
+	shutdowns := []func(context.Context) error{mp.Shutdown, tpShutdown}
+
+	if cfg.LogsMode == ModePush {
+		lp, err := newLogProvider(ctx, res, cfg)
+		if err != nil {
+			return Result{}, err
+		}
+		slog.SetDefault(newPushLogger(lp, level))
+		shutdowns = append(shutdowns, lp.Shutdown)
+	}
+
+	finalShutdowns := shutdowns
+	shutdown := func(ctx context.Context) error {
+		var errs []error
+		for i := len(finalShutdowns) - 1; i >= 0; i-- {
+			if err := finalShutdowns[i](ctx); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		return errors.Join(errs...)
+	}
+
 	return Result{
-		Shutdown:       mp.Shutdown,
+		Shutdown:       shutdown,
 		MetricsHandler: metricsHandler,
 		AppMetrics:     am,
 		WrapHandler:    func(h http.Handler) http.Handler { return otelhttp.NewHandler(h, "sentinelsnap") },

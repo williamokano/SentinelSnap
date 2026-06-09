@@ -14,15 +14,15 @@ import (
 )
 
 func TestBroadcast_ZeroClients(t *testing.T) {
-	h := hub.New()
+	h := hub.New(nil)
 	// Must not panic or block when there are no connected clients.
 	assert.NotPanics(t, func() {
-		h.Broadcast(hub.EventSnapCreated, map[string]int{"id": 1})
+		h.Broadcast(context.Background(), hub.EventSnapCreated, map[string]int{"id": 1})
 	})
 }
 
 func TestBroadcast_SlowClient_NonBlockingSkip(t *testing.T) {
-	h := hub.New()
+	h := hub.New(nil)
 
 	// Connect a real SSE client over an in-process test server so the hub's
 	// select/default path can be exercised without blocking the test goroutine.
@@ -62,7 +62,7 @@ func TestBroadcast_SlowClient_NonBlockingSkip(t *testing.T) {
 	// Trigger a broadcast to unblock ServeSSE's select so it sends headers.
 	<-sseReady
 	time.Sleep(10 * time.Millisecond)
-	h.Broadcast(hub.EventSnapCreated, map[string]int{"id": 0})
+	h.Broadcast(context.Background(), hub.EventSnapCreated, map[string]int{"id": 0})
 
 	select {
 	case <-connectedCh:
@@ -76,7 +76,7 @@ func TestBroadcast_SlowClient_NonBlockingSkip(t *testing.T) {
 	go func() {
 		defer close(done)
 		for i := 1; i <= 50; i++ {
-			h.Broadcast(hub.EventSnapCreated, map[string]int{"id": i})
+			h.Broadcast(context.Background(), hub.EventSnapCreated, map[string]int{"id": i})
 		}
 	}()
 
@@ -89,7 +89,7 @@ func TestBroadcast_SlowClient_NonBlockingSkip(t *testing.T) {
 }
 
 func TestServeSSE_ClientDisconnect_TriggersCleanup(t *testing.T) {
-	h := hub.New()
+	h := hub.New(nil)
 
 	server := httptest.NewServer(http.HandlerFunc(h.ServeSSE))
 	defer server.Close()
@@ -106,7 +106,7 @@ func TestServeSSE_ClientDisconnect_TriggersCleanup(t *testing.T) {
 	go func() {
 		// Trigger a broadcast so the server writes something and flushes headers.
 		time.Sleep(20 * time.Millisecond)
-		h.Broadcast(hub.EventSnapCreated, map[string]int{"id": 1})
+		h.Broadcast(context.Background(), hub.EventSnapCreated, map[string]int{"id": 1})
 	}()
 
 	resp, err := http.DefaultClient.Do(req)
@@ -144,6 +144,6 @@ func TestServeSSE_ClientDisconnect_TriggersCleanup(t *testing.T) {
 
 	// A subsequent broadcast must not panic or block.
 	assert.NotPanics(t, func() {
-		h.Broadcast(hub.EventSnapDeleted, map[string]int{"id": 1})
+		h.Broadcast(context.Background(), hub.EventSnapDeleted, map[string]int{"id": 1})
 	})
 }

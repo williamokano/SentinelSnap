@@ -32,7 +32,7 @@ type Config struct {
 	LogLevel  string
 	LogFormat string
 
-	// OTel exporter settings — loaded for future use; metrics/traces/log-push are not yet active (Phase 2+)
+	// OTel exporter settings — endpoint, protocol, sampling, and per-signal modes.
 	OtelEnabled     bool
 	OtelServiceName string
 	OTLPEndpoint    string

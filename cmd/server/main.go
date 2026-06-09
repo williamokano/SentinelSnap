@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
@@ -31,23 +32,35 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	obs, err := observability.Setup(ctx, observability.FromAppConfig(cfg))
 	if err != nil {
 		log.Fatalf("observability: %v", err)
 	}
-	defer func() {
-		if err := obs.Shutdown(ctx); err != nil {
-			slog.Error("observability shutdown", "error", err)
-		}
-	}()
 
-	db, err := sqlx.Connect(cfg.DBDriver, cfg.DBDSN)
+	// observability.OpenDB wraps the driver with otelsql (DB spans + pool
+	// metrics) when OTel is enabled, and hands back the matching cleanup.
+	// sqlx.NewDb is always given "postgres" so that sqlx keeps $N bindvar style ($1, $2, …).
+	stdDB, dbCleanup, err := observability.OpenDB(cfg.DBDriver, cfg.DBDSN, cfg.OtelEnabled)
 	if err != nil {
-		slog.Error("connect db", "error", err)
+		slog.Error("open db", "driver", cfg.DBDriver, "error", err)
 		os.Exit(1)
 	}
-	defer func() { _ = db.Close() }()
+	defer dbCleanup()
+	db := sqlx.NewDb(stdDB, "postgres")
+	// Deferred (not run inline at the end of main) so the DB still closes if
+	// anything in the shutdown sequence panics.
+	defer func() {
+		if err := db.Close(); err != nil {
+			slog.Error("db close", "error", err)
+		}
+	}()
+	if err := db.PingContext(ctx); err != nil {
+		slog.Error("ping db", "driver", cfg.DBDriver, "error", err)
+		os.Exit(1)
+	}
 
 	if err := migrate.Run(db); err != nil {
 		slog.Error("migrations", "error", err)
@@ -69,38 +82,46 @@ func main() {
 		os.Exit(1)
 	}
 
-	ev := hub.New()
+	ev := hub.New(obs.AppMetrics)
+	if err := obs.AppMetrics.SetSSEClientsFn(ev.ClientCount); err != nil {
+		slog.Error("sse clients gauge", "error", err)
+		os.Exit(1)
+	}
 	h := handler.NewSnapHandler(repo, store, ev, cfg, obs.AppMetrics)
 	hh := handler.NewHealthHandler(db)
 	r := router.New(cfg, h, ev, hh, obs.MetricsHandler)
 
-	addr := fmt.Sprintf(":%d", cfg.HTTPPort)
 	srv := &http.Server{
-		Addr:              addr,
+		Addr:              fmt.Sprintf(":%d", cfg.HTTPPort),
 		Handler:           obs.WrapHandler(r),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	// Close SSE client channels as part of Shutdown: their handlers only
+	// return when the hub channel closes, so without this every shutdown
+	// with a connected browser blocks for the full timeout.
+	srv.RegisterOnShutdown(ev.Close)
 
+	slog.Info("listening", "addr", srv.Addr)
 	go func() {
-		slog.Info("listening", "addr", addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("serve", "error", err)
 			os.Exit(1)
 		}
 	}()
 
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	slog.Info("shutting down", "timeout_seconds", cfg.ShutdownTimeoutSeconds)
+	<-ctx.Done()
+	slog.Info("shutting down")
 
-	timeout := time.Duration(cfg.ShutdownTimeoutSeconds) * time.Second
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.ShutdownTimeoutSeconds)*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		slog.Error("shutdown error", "error", err)
+		slog.Error("http server shutdown", "error", err)
 	}
-	ev.Close()
-	slog.Info("server stopped")
+	// Use stdlib log: slog may route through the OTLP push logger whose
+	// provider is about to be (or already is) shut down.
+	if err := obs.Shutdown(shutdownCtx); err != nil {
+		log.Printf("observability shutdown: %v", err)
+	}
+	log.Printf("server stopped")
 }
