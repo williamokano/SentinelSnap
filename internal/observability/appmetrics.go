@@ -96,14 +96,27 @@ func (a *AppMetrics) PhotoStored(ctx context.Context, sizeBytes int64) {
 	a.photoSize.Record(ctx, sizeBytes)
 }
 
+// sseEventOptions precomputes the measurement options for the event types the
+// hub broadcasts, so the hot broadcast path does not rebuild an attribute set
+// per call. Unknown event types fall back to per-call construction.
+var sseEventOptions = func() map[string]metric.MeasurementOption {
+	opts := make(map[string]metric.MeasurementOption)
+	for _, et := range []string{"snap", "snap_updated", "snap_deleted"} {
+		opts[et] = metric.WithAttributeSet(attribute.NewSet(attribute.String("event_type", et)))
+	}
+	return opts
+}()
+
 // SSEBroadcast increments the sse.broadcasts counter with the given event type.
 func (a *AppMetrics) SSEBroadcast(ctx context.Context, eventType string) {
 	if a == nil || a.sseBroadcasts == nil {
 		return
 	}
-	a.sseBroadcasts.Add(ctx, 1, metric.WithAttributes(
-		attribute.String("event_type", eventType),
-	))
+	opt, ok := sseEventOptions[eventType]
+	if !ok {
+		opt = metric.WithAttributes(attribute.String("event_type", eventType))
+	}
+	a.sseBroadcasts.Add(ctx, 1, opt)
 }
 
 // SetSSEClientsFn registers fn as the source for the sse.clients observable gauge.

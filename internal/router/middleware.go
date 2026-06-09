@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"time"
@@ -37,17 +38,20 @@ func securityHeaders(cfg *config.Config) func(http.Handler) http.Handler {
 	}
 }
 
+// routePattern returns the matched chi route pattern, or "" when unavailable.
+func routePattern(ctx context.Context) string {
+	if rctx := chi.RouteContext(ctx); rctx != nil {
+		return rctx.RoutePattern()
+	}
+	return ""
+}
+
 // routeTagger propagates the matched chi route pattern to the otelhttp labeler
 // so that HTTP metrics carry a populated http.route attribute.
 func routeTagger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		rctx := chi.RouteContext(ctx)
-		if rctx == nil {
-			next.ServeHTTP(w, r)
-			return
-		}
-		if pattern := rctx.RoutePattern(); pattern != "" {
+		if pattern := routePattern(ctx); pattern != "" {
 			if labeler, ok := otelhttp.LabelerFromContext(ctx); ok {
 				labeler.Add(semconv.HTTPRoute(pattern))
 			}
@@ -68,10 +72,8 @@ func slogRequestLogger(next http.Handler) http.Handler {
 				status = http.StatusOK
 			}
 			route := r.URL.Path
-			if rctx := chi.RouteContext(ctx); rctx != nil {
-				if p := rctx.RoutePattern(); p != "" {
-					route = p
-				}
+			if p := routePattern(ctx); p != "" {
+				route = p
 			}
 			logFn := slog.InfoContext
 			if status >= 500 {
