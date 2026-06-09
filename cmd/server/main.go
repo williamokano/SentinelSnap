@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log"
@@ -13,10 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/XSAM/otelsql"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
-	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/williamokano/sentinelsnap/internal/config"
 	"github.com/williamokano/sentinelsnap/internal/handler"
@@ -43,36 +40,26 @@ func main() {
 		log.Fatalf("observability: %v", err)
 	}
 
-	// When OTel is enabled, wrap the driver with otelsql for DB span instrumentation
-	// and pool metrics. When disabled, use the plain driver to avoid overhead.
+	// observability.OpenDB wraps the driver with otelsql (DB spans + pool
+	// metrics) when OTel is enabled, and hands back the matching cleanup.
 	// sqlx.NewDb is always given "postgres" so that sqlx keeps $N bindvar style ($1, $2, …).
-	var stdDB *sql.DB
-	if cfg.OtelEnabled {
-		stdDB, err = otelsql.Open(cfg.DBDriver, cfg.DBDSN,
-			otelsql.WithAttributes(attribute.String("db.system.name", "postgresql")),
-		)
-	} else {
-		stdDB, err = sql.Open(cfg.DBDriver, cfg.DBDSN)
-	}
+	stdDB, dbCleanup, err := observability.OpenDB(cfg.DBDriver, cfg.DBDSN, cfg.OtelEnabled)
 	if err != nil {
 		slog.Error("open db", "driver", cfg.DBDriver, "error", err)
 		os.Exit(1)
 	}
+	defer dbCleanup()
 	db := sqlx.NewDb(stdDB, "postgres")
+	// Deferred (not run inline at the end of main) so the DB still closes if
+	// anything in the shutdown sequence panics.
+	defer func() {
+		if err := db.Close(); err != nil {
+			slog.Error("db close", "error", err)
+		}
+	}()
 	if err := db.PingContext(ctx); err != nil {
 		slog.Error("ping db", "driver", cfg.DBDriver, "error", err)
 		os.Exit(1)
-	}
-
-	var dbStatsReg interface{ Unregister() error }
-	if cfg.OtelEnabled {
-		dbStatsReg, err = otelsql.RegisterDBStatsMetrics(stdDB,
-			otelsql.WithAttributes(attribute.String("db.system.name", "postgresql")),
-		)
-		if err != nil {
-			slog.Error("db stats metrics", "error", err)
-			os.Exit(1)
-		}
 	}
 
 	if err := migrate.Run(db); err != nil {
@@ -109,6 +96,10 @@ func main() {
 		Handler:           obs.WrapHandler(r),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	// Close SSE client channels as part of Shutdown: their handlers only
+	// return when the hub channel closes, so without this every shutdown
+	// with a connected browser blocks for the full timeout.
+	srv.RegisterOnShutdown(ev.Close)
 
 	slog.Info("listening", "addr", srv.Addr)
 	go func() {
@@ -127,15 +118,6 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("http server shutdown", "error", err)
 	}
-	if dbStatsReg != nil {
-		if err := dbStatsReg.Unregister(); err != nil {
-			slog.Error("db stats unregister", "error", err)
-		}
-	}
-	if err := db.Close(); err != nil {
-		slog.Error("db close", "error", err)
-	}
-	ev.Close()
 	// Use stdlib log: slog may route through the OTLP push logger whose
 	// provider is about to be (or already is) shut down.
 	if err := obs.Shutdown(shutdownCtx); err != nil {
