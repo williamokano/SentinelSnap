@@ -5,7 +5,7 @@ import (
 	"embed"
 	"io"
 	"io/fs"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -26,9 +26,12 @@ func New(cfg *config.Config, h *handler.SnapHandler, ev *hub.Hub, hh *handler.He
 	r.Get("/healthz", hh.Check)
 
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.Logger)
-		r.Use(middleware.Recoverer)
+		// Order matters: RequestID before the logger so request_id is loggable,
+		// and Recoverer inside the logger so the 500 it writes on panic is the
+		// status the logger reports (otherwise panics are logged as 200).
 		r.Use(middleware.RequestID)
+		r.Use(slogRequestLogger)
+		r.Use(middleware.Recoverer)
 		if cfg.Debug {
 			r.Use(debugBodyLogger)
 		}
@@ -56,12 +59,14 @@ func debugBodyLogger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
-			log.Printf("[DEBUG] %s %s — failed to read body: %v", r.Method, r.URL.Path, err)
+			slog.DebugContext(r.Context(), "debug: failed to read body",
+				"method", r.Method, "path", r.URL.Path, "error", err)
 			next.ServeHTTP(w, r)
 			return
 		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
-		log.Printf("[DEBUG] %s %s — body: %s", r.Method, r.URL.Path, body)
+		slog.DebugContext(r.Context(), "debug: request body",
+			"method", r.Method, "path", r.URL.Path, "body", string(body))
 		next.ServeHTTP(w, r)
 	})
 }

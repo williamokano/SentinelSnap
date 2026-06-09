@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,6 +17,7 @@ import (
 	"github.com/williamokano/sentinelsnap/internal/handler"
 	"github.com/williamokano/sentinelsnap/internal/hub"
 	"github.com/williamokano/sentinelsnap/internal/migrate"
+	"github.com/williamokano/sentinelsnap/internal/observability"
 	"github.com/williamokano/sentinelsnap/internal/repository/postgres"
 	"github.com/williamokano/sentinelsnap/internal/router"
 	"github.com/williamokano/sentinelsnap/internal/storage"
@@ -28,14 +30,27 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
+	ctx := context.Background()
+	obsShutdown, err := observability.Setup(ctx, observability.FromAppConfig(cfg))
+	if err != nil {
+		log.Fatalf("observability: %v", err)
+	}
+	defer func() {
+		if err := obsShutdown(ctx); err != nil {
+			slog.Error("observability shutdown", "error", err)
+		}
+	}()
+
 	db, err := sqlx.Connect(cfg.DBDriver, cfg.DBDSN)
 	if err != nil {
-		log.Fatalf("connect db: %v", err)
+		slog.Error("connect db", "error", err)
+		os.Exit(1)
 	}
 	defer func() { _ = db.Close() }()
 
 	if err := migrate.Run(db); err != nil {
-		log.Fatalf("migrations: %v", err)
+		slog.Error("migrations", "error", err)
+		os.Exit(1)
 	}
 
 	repo := postgres.New(db)
@@ -45,10 +60,12 @@ func main() {
 	case "local":
 		store, err = local.New(cfg.LocalUploadDir)
 		if err != nil {
-			log.Fatalf("local storage: %v", err)
+			slog.Error("local storage", "error", err)
+			os.Exit(1)
 		}
 	default:
-		log.Fatalf("unknown storage backend: %q (supported: local)", cfg.StorageBackend)
+		slog.Error("unknown storage backend", "backend", cfg.StorageBackend)
+		os.Exit(1)
 	}
 
 	ev := hub.New()
@@ -64,24 +81,25 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("listening on %s", addr)
+		slog.Info("listening", "addr", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("serve: %v", err)
+			slog.Error("serve", "error", err)
+			os.Exit(1)
 		}
 	}()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-	log.Println("shutting down...")
+	slog.Info("shutting down", "timeout_seconds", cfg.ShutdownTimeoutSeconds)
 
 	timeout := time.Duration(cfg.ShutdownTimeoutSeconds) * time.Second
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Printf("shutdown error: %v", err)
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		slog.Error("shutdown error", "error", err)
 	}
 	ev.Close()
-	log.Println("server stopped")
+	slog.Info("server stopped")
 }

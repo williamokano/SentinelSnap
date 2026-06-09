@@ -4,7 +4,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
-	"log"
+	"log/slog"
 	"sort"
 	"strings"
 
@@ -54,7 +54,7 @@ func Run(db *sqlx.DB) error {
 		if _, err := db.Exec(`INSERT INTO schema_migrations (filename) VALUES ($1)`, name); err != nil {
 			return fmt.Errorf("record migration %s: %w", name, err)
 		}
-		log.Printf("applied migration: %s", name)
+		slog.Info("applied migration", "file", name)
 	}
 	return nil
 }

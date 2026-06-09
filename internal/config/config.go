@@ -27,6 +27,20 @@ type Config struct {
 	S3Endpoint  string
 	S3AccessKey string
 	S3SecretKey string
+
+	// Logging (always active)
+	LogLevel  string
+	LogFormat string
+
+	// OTel exporter settings — loaded for future use; metrics/traces/log-push are not yet active (Phase 2+)
+	OtelEnabled     bool
+	OtelServiceName string
+	OTLPEndpoint    string
+	OTLPProtocol    string
+	MetricsMode     string
+	TracesMode      string
+	LogsMode        string
+	TraceSampleRate float64
 }
 
 func Load() (*Config, error) {
@@ -55,6 +69,16 @@ func Load() (*Config, error) {
 		S3Endpoint:             os.Getenv("S3_ENDPOINT"),
 		S3AccessKey:            os.Getenv("S3_ACCESS_KEY"),
 		S3SecretKey:            os.Getenv("S3_SECRET_KEY"),
+		LogLevel:               getEnv("LOG_LEVEL", "info"),
+		LogFormat:              getEnv("LOG_FORMAT", "json"),
+		OtelEnabled:            getEnvBool("OTEL_ENABLED"),
+		OtelServiceName:        getEnv("OTEL_SERVICE_NAME", "sentinelsnap"),
+		OTLPEndpoint:           getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"),
+		OTLPProtocol:           getEnv("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc"),
+		MetricsMode:            getEnv("OTEL_METRICS_MODE", "pull"),
+		TracesMode:             getEnv("OTEL_TRACES_MODE", "push"),
+		LogsMode:               getEnv("OTEL_LOGS_MODE", "stdout"),
+		TraceSampleRate:        getEnvFloat("OTEL_TRACES_SAMPLER_ARG", 1.0),
 	}, nil
 }
 
@@ -70,4 +94,16 @@ func getEnvInt(key string, fallback int) int {
 		return v
 	}
 	return fallback
+}
+
+func getEnvFloat(key string, fallback float64) float64 {
+	if v, err := strconv.ParseFloat(os.Getenv(key), 64); err == nil {
+		return v
+	}
+	return fallback
+}
+
+func getEnvBool(key string) bool {
+	v := os.Getenv(key)
+	return v == "true" || v == "1"
 }
