@@ -88,6 +88,51 @@ func TestBroadcast_SlowClient_NonBlockingSkip(t *testing.T) {
 	}
 }
 
+func TestServeSSE_Heartbeat_PingsIdleConnection(t *testing.T) {
+	restore := hub.SetHeartbeatInterval(50 * time.Millisecond)
+	defer restore()
+
+	h := hub.New(nil)
+
+	server := httptest.NewServer(http.HandlerFunc(h.ServeSSE))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// No broadcasts are sent: the heartbeat alone must flush headers and
+	// produce traffic on an otherwise idle connection.
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	scanner := bufio.NewScanner(resp.Body)
+	received := make(chan string, 1)
+	go func() {
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, ": ping") {
+				received <- line
+				return
+			}
+		}
+	}()
+
+	select {
+	case line := <-received:
+		assert.Equal(t, ": ping", line)
+	case <-time.After(3 * time.Second):
+		t.Fatal("did not receive heartbeat ping before timeout")
+	}
+}
+
 func TestServeSSE_ClientDisconnect_TriggersCleanup(t *testing.T) {
 	h := hub.New(nil)
 
