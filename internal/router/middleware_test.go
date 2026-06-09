@@ -1,10 +1,13 @@
 package router
 
 import (
+	"bytes"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/stretchr/testify/assert"
 	"github.com/williamokano/sentinelsnap/internal/config"
 )
@@ -40,4 +43,23 @@ func TestSecurityHeaders(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSlogRequestLogger_PanicLoggedAs500(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	// Same composition as router.New: logger outside, Recoverer inside, so the
+	// 500 written by Recoverer is what the request log reports.
+	h := slogRequestLogger(middleware.Recoverer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic("boom")
+	})))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/panic", nil))
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, buf.String(), `"status":500`)
 }

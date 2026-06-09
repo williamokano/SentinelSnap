@@ -26,9 +26,12 @@ func New(cfg *config.Config, h *handler.SnapHandler, ev *hub.Hub, hh *handler.He
 	r.Get("/healthz", hh.Check)
 
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.Recoverer)
+		// Order matters: RequestID before the logger so request_id is loggable,
+		// and Recoverer inside the logger so the 500 it writes on panic is the
+		// status the logger reports (otherwise panics are logged as 200).
 		r.Use(middleware.RequestID)
 		r.Use(slogRequestLogger)
+		r.Use(middleware.Recoverer)
 		if cfg.Debug {
 			r.Use(debugBodyLogger)
 		}
