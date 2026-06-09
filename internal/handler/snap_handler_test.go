@@ -177,6 +177,55 @@ func TestCreateSnap_NoPhotos(t *testing.T) {
 	repo.AssertNotCalled(t, "CreateSnap")
 }
 
+func TestCreateSnap_BodyLimits(t *testing.T) {
+	tooManyPhotos := make([]string, 11)
+	for i := range tooManyPhotos {
+		tooManyPhotos[i] = b64("imgdata")
+	}
+	// A single photo whose base64 payload pushes the body past the 50 MiB cap.
+	oversized := postBody(37.77, -122.41, []string{strings.Repeat("A", 51<<20)})
+
+	tests := []struct {
+		name       string
+		body       []byte
+		wantStatus int
+	}{
+		{"body over 50 MiB returns 413", oversized, http.StatusRequestEntityTooLarge},
+		{"more than 10 photos returns 400", postBody(37.77, -122.41, tooManyPhotos), http.StatusBadRequest},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &repoMock.SnapRepository{}
+			store := &storageMock.StorageProvider{}
+
+			req := httptest.NewRequest(http.MethodPost, "/snaps", bytes.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+
+			newHandler(repo, store).CreateSnap(w, req)
+
+			assert.Equal(t, tc.wantStatus, w.Code)
+			repo.AssertNotCalled(t, "CreateSnap")
+		})
+	}
+}
+
+func TestUpdateSnap_BodyTooLarge(t *testing.T) {
+	repo := &repoMock.SnapRepository{}
+	store := &storageMock.StorageProvider{}
+
+	body := []byte(`{"name":"` + strings.Repeat("a", 2<<20) + `"}`)
+	req := withParam(httptest.NewRequest(http.MethodPatch, "/snaps/1", bytes.NewReader(body)), "id", "1")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	newHandler(repo, store).UpdateSnap(w, req)
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
+	repo.AssertNotCalled(t, "UpdateSnapName")
+}
+
 func TestCreateSnap_StorageFailure_Rollback(t *testing.T) {
 	repo := &repoMock.SnapRepository{}
 	store := &storageMock.StorageProvider{}

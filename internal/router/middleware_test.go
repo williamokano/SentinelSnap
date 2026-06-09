@@ -2,9 +2,11 @@ package router
 
 import (
 	"bytes"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -118,6 +120,49 @@ func TestSlogRequestLogger_NoWriteDefaultsTo200(t *testing.T) {
 	handler.ServeHTTP(w, req)
 
 	assert.Contains(t, logBuf.String(), `"status":200`)
+}
+
+func TestDebugBodyLogger_Truncation(t *testing.T) {
+	tests := []struct {
+		name          string
+		body          string
+		wantTruncated bool
+	}{
+		{"small body logged in full", "hello world", false},
+		{"exactly 1 KiB not marked truncated", strings.Repeat("a", debugBodyLogPrefixBytes), false},
+		{"large body truncated to 1 KiB", strings.Repeat("b", 5000), true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+			t.Cleanup(func() { slog.SetDefault(prev) })
+
+			var seenByHandler string
+			h := debugBodyLogger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				b, err := io.ReadAll(r.Body)
+				require.NoError(t, err)
+				seenByHandler = string(b)
+			}))
+
+			req := httptest.NewRequest(http.MethodPost, "/snaps", strings.NewReader(tc.body))
+			h.ServeHTTP(httptest.NewRecorder(), req)
+
+			assert.Equal(t, tc.body, seenByHandler, "handler must still see the full body")
+
+			logOutput := buf.String()
+			if tc.wantTruncated {
+				assert.Contains(t, logOutput, "(truncated)")
+				assert.NotContains(t, logOutput, strings.Repeat("b", debugBodyLogPrefixBytes+1),
+					"log must not contain more than the prefix")
+			} else {
+				assert.Contains(t, logOutput, tc.body)
+				assert.NotContains(t, logOutput, "(truncated)")
+			}
+		})
+	}
 }
 
 func TestRouteTagger_NilChiContext(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -20,6 +21,14 @@ import (
 	"github.com/williamokano/sentinelsnap/internal/observability"
 	"github.com/williamokano/sentinelsnap/internal/repository"
 	"github.com/williamokano/sentinelsnap/internal/storage"
+)
+
+const (
+	// maxSnapBodyBytes caps POST /snaps bodies: up to maxPhotosPerSnap base64
+	// photos plus JSON overhead fit comfortably within 50 MiB.
+	maxSnapBodyBytes   = 50 << 20
+	maxUpdateBodyBytes = 1 << 20
+	maxPhotosPerSnap   = 10
 )
 
 type SnapHandler struct {
@@ -63,8 +72,16 @@ type createSnapRequest struct {
 }
 
 func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxSnapBodyBytes)
+
 	var req createSnapRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge,
+				fmt.Sprintf("request body exceeds %d bytes", maxBytesErr.Limit))
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
@@ -75,6 +92,11 @@ func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(req.Photos) == 0 {
 		writeError(w, http.StatusBadRequest, "at least one photo is required")
+		return
+	}
+	if len(req.Photos) > maxPhotosPerSnap {
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("at most %d photos per snap, got %d", maxPhotosPerSnap, len(req.Photos)))
 		return
 	}
 
@@ -190,10 +212,18 @@ func (h *SnapHandler) UpdateSnap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxUpdateBodyBytes)
+
 	var req struct {
 		Name string `json:"name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge,
+				fmt.Sprintf("request body exceeds %d bytes", maxBytesErr.Limit))
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}

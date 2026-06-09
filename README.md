@@ -205,6 +205,8 @@ Create a new snap with one or more photos.
 
 `photos` is a plain array of base64-encoded image bytes. The server detects the content type automatically (JPEG, PNG, GIF, WebP) and generates a random filename — no metadata needed from the client. `latitude` and `longitude` accept both numbers and strings (iOS Shortcuts sends strings).
 
+Limits: request bodies larger than 50 MiB are rejected with `413 Request Entity Too Large`, and at most 10 photos are accepted per snap (`400` otherwise).
+
 **Response `201`:**
 
 ```json
@@ -237,7 +239,7 @@ List all snaps with their photos, newest first.
 
 ### `PATCH /snaps/{id}`
 
-Rename a snap (max 100 characters). Empty string clears the name back to the default "Snap #N" display.
+Rename a snap (max 100 characters). Empty string clears the name back to the default "Snap #N" display. Request bodies larger than 1 MiB are rejected with `413`.
 
 **Request body:**
 

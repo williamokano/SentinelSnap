@@ -58,29 +58,41 @@ func New(cfg *config.Config, h *handler.SnapHandler, ev *hub.Hub, hh *handler.He
 		r.Get("/photos/{token}", h.ServePhoto)
 		r.Get("/events", ev.ServeSSE)
 
-		if cfg.StorageBackend == "local" {
-			fileServer := http.FileServer(http.Dir(cfg.LocalUploadDir))
-			r.Handle("/uploads/*", http.StripPrefix("/uploads/", fileServer))
-		}
-
 		r.Handle("/*", http.FileServer(http.FS(staticFS)))
 	})
 
 	return r
 }
 
+// debugBodyLogPrefixBytes bounds how much of a request body the debug logger
+// reads and logs; bodies with base64 photos run to megabytes per request.
+const debugBodyLogPrefixBytes = 1024
+
 func debugBodyLogger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
+		// Read one byte past the prefix so we can tell whether the body was
+		// actually truncated when it is exactly debugBodyLogPrefixBytes long.
+		read := make([]byte, debugBodyLogPrefixBytes+1)
+		n, err := io.ReadFull(r.Body, read)
+		if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
 			slog.DebugContext(r.Context(), "debug: failed to read body",
 				"method", r.Method, "path", r.URL.Path, "error", err)
 			next.ServeHTTP(w, r)
 			return
 		}
-		r.Body = io.NopCloser(bytes.NewReader(body))
+		read = read[:n]
+
+		logged := string(read[:min(n, debugBodyLogPrefixBytes)])
+		if n > debugBodyLogPrefixBytes {
+			logged += " (truncated)"
+		}
 		slog.DebugContext(r.Context(), "debug: request body",
-			"method", r.Method, "path", r.URL.Path, "body", string(body))
+			"method", r.Method, "path", r.URL.Path, "body", logged)
+
+		r.Body = struct {
+			io.Reader
+			io.Closer
+		}{io.MultiReader(bytes.NewReader(read), r.Body), r.Body}
 		next.ServeHTTP(w, r)
 	})
 }
