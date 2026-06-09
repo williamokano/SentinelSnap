@@ -24,6 +24,7 @@ import (
 	"github.com/williamokano/sentinelsnap/internal/router"
 	"github.com/williamokano/sentinelsnap/internal/storage"
 	"github.com/williamokano/sentinelsnap/internal/storage/local"
+	"github.com/williamokano/sentinelsnap/migrations"
 )
 
 func main() {
@@ -62,7 +63,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := migrate.Run(db); err != nil {
+	if err := migrate.Run(ctx, db, migrations.FS); err != nil {
 		slog.Error("migrations", "error", err)
 		os.Exit(1)
 	}
