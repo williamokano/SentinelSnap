@@ -11,6 +11,10 @@ type SnapRepository struct {
 	mock.Mock
 }
 
+func (m *SnapRepository) CreateSnapWithPhotos(ctx context.Context, snap *domain.Snap, photos []domain.Photo) error {
+	return m.Called(ctx, snap, photos).Error(0)
+}
+
 func (m *SnapRepository) CreateSnap(ctx context.Context, snap *domain.Snap) (int64, error) {
 	args := m.Called(ctx, snap)
 	return args.Get(0).(int64), args.Error(1)

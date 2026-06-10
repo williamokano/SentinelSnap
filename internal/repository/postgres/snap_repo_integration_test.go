@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/williamokano/sentinelsnap/internal/domain"
+	"github.com/williamokano/sentinelsnap/internal/repository"
 	"github.com/williamokano/sentinelsnap/internal/repository/postgres"
 )
 
@@ -23,35 +24,36 @@ func openTestDB(t *testing.T) *sqlx.DB {
 	}
 	db, err := sqlx.Connect("postgres", dsn)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
 
-func TestCreateSnap_and_ListSnaps(t *testing.T) {
+func TestCreateSnapWithPhotos_and_ListSnaps(t *testing.T) {
 	db := openTestDB(t)
-	tx := db.MustBegin()
-	t.Cleanup(func() { tx.Rollback() })
-
-	repo := postgres.New(tx.Unsafe())
+	var repo repository.SnapRepository = postgres.New(db)
 
 	ctx := context.Background()
-	snapID, err := repo.CreateSnap(ctx, &domain.Snap{Latitude: 37.77, Longitude: -122.41})
-	require.NoError(t, err)
-	assert.Positive(t, snapID)
+	snap := &domain.Snap{Latitude: 37.77, Longitude: -122.41}
+	photos := []domain.Photo{
+		{Token: "tok-integration-1", StoredKey: "snaps/1/photo1.jpg"},
+		{Token: "tok-integration-2", StoredKey: "snaps/1/photo2.jpg"},
+	}
+	require.NoError(t, repo.CreateSnapWithPhotos(ctx, snap, photos))
+	// CreateSnapWithPhotos opens its own transaction, so clean up via the
+	// repository (the cascade removes the photo rows).
+	t.Cleanup(func() { _ = repo.DeleteSnap(context.Background(), snap.ID) })
 
-	photoID, err := repo.AddPhoto(ctx, &domain.Photo{
-		SnapID:    snapID,
-		URL:       "http://example.com/photo.jpg",
-		StoredKey: "snaps/1/photo.jpg",
-	})
-	require.NoError(t, err)
-	assert.Positive(t, photoID)
+	assert.Positive(t, snap.ID)
+	for _, p := range photos {
+		assert.Positive(t, p.ID)
+		assert.Equal(t, snap.ID, p.SnapID)
+	}
 
-	snaps, err := repo.ListSnaps(ctx)
+	got, err := repo.GetSnapByID(ctx, snap.ID)
 	require.NoError(t, err)
-	require.Len(t, snaps, 1)
-	assert.Equal(t, snapID, snaps[0].ID)
-	require.Len(t, snaps[0].Photos, 1)
-	assert.Equal(t, photoID, snaps[0].Photos[0].ID)
+	require.Len(t, got.Photos, 2)
+	assert.Equal(t, photos[0].ID, got.Photos[0].ID)
+	assert.Equal(t, photos[1].ID, got.Photos[1].ID)
 }
 
 func TestGetSnapByID_NotFound(t *testing.T) {

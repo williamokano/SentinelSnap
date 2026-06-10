@@ -18,6 +18,43 @@ func New(db *sqlx.DB) *snapRepository {
 	return &snapRepository{db: db}
 }
 
+// CreateSnapWithPhotos inserts the snap and all of its photos atomically:
+// either every row lands or none do, so a mid-creation failure can never
+// leave a snap without its photo metadata. Generated IDs are written back
+// onto snap and the photos slice elements.
+func (r *snapRepository) CreateSnapWithPhotos(ctx context.Context, snap *domain.Snap, photos []domain.Photo) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("create snap with photos: begin tx: %w", err)
+	}
+	// Rollback after a successful Commit is a harmless no-op.
+	defer func() { _ = tx.Rollback() }()
+
+	if err := tx.QueryRowContext(ctx,
+		`INSERT INTO snaps (latitude, longitude) VALUES ($1, $2) RETURNING id`,
+		snap.Latitude, snap.Longitude,
+	).Scan(&snap.ID); err != nil {
+		return fmt.Errorf("create snap with photos: insert snap: %w", err)
+	}
+
+	for i := range photos {
+		photos[i].SnapID = snap.ID
+		if err := tx.QueryRowContext(ctx,
+			`INSERT INTO photos (snap_id, stored_key, token) VALUES ($1, $2, $3) RETURNING id`,
+			snap.ID, photos[i].StoredKey, photos[i].Token,
+		).Scan(&photos[i].ID); err != nil {
+			return fmt.Errorf("create snap with photos: insert photo %d: %w", i, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("create snap with photos: commit: %w", err)
+	}
+	return nil
+}
+
+// Deprecated: use CreateSnapWithPhotos so the snap and its photos are written
+// atomically.
 func (r *snapRepository) CreateSnap(ctx context.Context, snap *domain.Snap) (int64, error) {
 	var id int64
 	err := r.db.QueryRowContext(ctx,
@@ -30,6 +67,8 @@ func (r *snapRepository) CreateSnap(ctx context.Context, snap *domain.Snap) (int
 	return id, nil
 }
 
+// Deprecated: use CreateSnapWithPhotos so the snap and its photos are written
+// atomically.
 func (r *snapRepository) AddPhoto(ctx context.Context, photo *domain.Photo) (int64, error) {
 	var id int64
 	err := r.db.QueryRowContext(ctx,
