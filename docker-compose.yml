@@ -24,7 +24,6 @@ services:
       DB_DSN: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
       LOCAL_UPLOAD_DIR: ${LOCAL_UPLOAD_DIR:-/app/uploads}
-      LOCAL_BASE_URL: ${LOCAL_BASE_URL:-http://localhost:8080/uploads}
     volumes:
       - ./uploads:/app/uploads
     healthcheck:

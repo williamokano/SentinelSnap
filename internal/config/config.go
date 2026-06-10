@@ -20,7 +20,6 @@ type Config struct {
 	StorageBackend string
 
 	LocalUploadDir string
-	LocalBaseURL   string
 
 	S3Bucket    string
 	S3Region    string
@@ -63,7 +62,6 @@ func Load() (*Config, error) {
 		DBDSN:                  dsn,
 		StorageBackend:         getEnv("STORAGE_BACKEND", "local"),
 		LocalUploadDir:         getEnv("LOCAL_UPLOAD_DIR", "./uploads"),
-		LocalBaseURL:           getEnv("LOCAL_BASE_URL", "http://localhost:8080/uploads"),
 		S3Bucket:               os.Getenv("S3_BUCKET"),
 		S3Region:               os.Getenv("S3_REGION"),
 		S3Endpoint:             os.Getenv("S3_ENDPOINT"),
