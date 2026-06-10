@@ -41,6 +41,14 @@ func main() {
 		log.Fatalf("observability: %v", err)
 	}
 
+	// Logged after observability setup so the warning goes through the
+	// configured structured logger rather than the default handler.
+	if cfg.APIToken == "" {
+		slog.Warn("API_TOKEN is not set: authentication is DISABLED — " +
+			"anyone who can reach this server can create, rename, and delete snaps " +
+			"and watch the live GPS/photo stream. Set API_TOKEN to enable auth.")
+	}
+
 	// observability.OpenDB wraps the driver with otelsql (DB spans + pool
 	// metrics) when OTel is enabled, and hands back the matching cleanup.
 	// sqlx.NewDb is always given "postgres" so that sqlx keeps $N bindvar style ($1, $2, …).

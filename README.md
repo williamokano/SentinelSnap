@@ -21,6 +21,20 @@ See [docs/](docs/) for detailed flow documentation.
 
 ---
 
+## Authentication
+
+Set `API_TOKEN` to require a static bearer token on all snap endpoints (`POST/GET /snaps`, `PATCH/DELETE /snaps/{id}`) and the SSE stream (`GET /events`):
+
+```bash
+API_TOKEN=$(openssl rand -hex 32)
+```
+
+Clients authenticate with an `Authorization: Bearer <token>` header. For SSE, where `EventSource` cannot set headers, pass the token as a query parameter instead: `GET /events?token=<token>`. Unauthenticated requests get `401 {"error":"unauthorized"}`.
+
+When `API_TOKEN` is empty (the default) authentication is disabled and the server is fully open — a warning is logged at startup. `/healthz`, `/metrics`, `GET /photos/{token}` (unguessable capability URLs), and the static map page are never token-protected; the map UI prompts for the token in the browser the first time the server rejects a request and remembers it in `localStorage`.
+
+---
+
 ## Phone setup
 
 ### iOS Shortcuts
@@ -33,7 +47,7 @@ See [docs/](docs/) for detailed flow documentation.
 6. Add a **Get Contents of URL** action:
    - URL: `http://<your-server-ip>:8080/snaps`
    - Method: `POST`
-   - Headers: `Content-Type: application/json`
+   - Headers: `Content-Type: application/json` — and, if your server has `API_TOKEN` set, add a second header `Authorization: Bearer <your-token>`
    - Body (JSON):
      ```json
      {
@@ -54,7 +68,7 @@ See [docs/](docs/) for detailed flow documentation.
    - **Take Photo** action (Camera → Take Photo) — save to a variable, disable flash and shutter sound.
    - **Get Location** action — store latitude and longitude in variables `%LOC_LAT` and `%LOC_LONG`.
    - **Base64 Encode** the photo file (Variable → Base64 Encode).
-   - **HTTP POST** to `http://<your-server-ip>:8080/snaps` with the same JSON body as above, substituting Tasker variables.
+   - **HTTP POST** to `http://<your-server-ip>:8080/snaps` with the same JSON body as above, substituting Tasker variables. If your server has `API_TOKEN` set, add a custom header `Authorization: Bearer <your-token>` to the request.
 3. Assign the task to a **widget**, a **gesture**, or a **Quick Settings tile** for fast, discreet triggering.
 
 ---
@@ -160,6 +174,7 @@ All variables can be set in a `.env` file (loaded automatically at startup) or p
 | Variable | Default | Description |
 |---|---|---|
 | `HTTP_PORT` | `8080` | Port the server listens on |
+| `API_TOKEN` | — | Bearer token required on `/snaps` and `/events` (see [Authentication](#authentication)). Empty disables auth |
 | `DB_DRIVER` | `postgres` | Database driver |
 | `DB_DSN` | — | **Required.** Full Postgres DSN |
 | `POSTGRES_DB` | — | Database name (used by docker-compose) |
@@ -295,7 +310,7 @@ Used by Docker and other orchestrators to determine container health.
 
 ### `GET /events`
 
-Server-Sent Events stream. The browser connects once on page load and receives push notifications for all snap activity. See [docs/realtime.md](docs/realtime.md) for the full event reference.
+Server-Sent Events stream. The browser connects once on page load and receives push notifications for all snap activity. When `API_TOKEN` is set, authenticate with `?token=<token>` (EventSource cannot send an `Authorization` header). See [docs/realtime.md](docs/realtime.md) for the full event reference.
 
 ---
 

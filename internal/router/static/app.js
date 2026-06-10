@@ -108,6 +108,32 @@ function showToast(msg, variant = '') {
   }, 3500);
 }
 
+const API_TOKEN_KEY = 'apiToken';
+
+function getApiToken() {
+  return localStorage.getItem(API_TOKEN_KEY) || '';
+}
+
+// Wrapper around fetch that attaches the stored bearer token and, on a 401,
+// prompts for a token, stores it, and retries once. When the server runs
+// without API_TOKEN configured this is a plain fetch.
+async function apiFetch(url, options = {}) {
+  const doFetch = () => {
+    const headers = Object.assign({}, options.headers);
+    const token = getApiToken();
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    return fetch(url, Object.assign({}, options, { headers }));
+  };
+  let res = await doFetch();
+  if (res.status === 401) {
+    const entered = prompt('This server requires an API token:');
+    if (entered === null) return res;
+    localStorage.setItem(API_TOKEN_KEY, entered.trim());
+    res = await doFetch();
+  }
+  return res;
+}
+
 function snapLabel(snap) {
   return snap.name || ('Snap #' + snap.id);
 }
@@ -158,7 +184,7 @@ function startRename(id) {
     const name = input.value.trim();
     input.replaceWith(titleEl);
     if (name === current) return;
-    await fetch(`/snaps/${id}`, {
+    await apiFetch(`/snaps/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }),
@@ -174,7 +200,7 @@ function startRename(id) {
 
 async function deleteSnap(id) {
   if (!confirm(`Delete "${snapLabel(entries.get(id)?.snap)}"? This cannot be undone.`)) return;
-  const res = await fetch(`/snaps/${id}`, { method: 'DELETE' });
+  const res = await apiFetch(`/snaps/${id}`, { method: 'DELETE' });
   if (!res.ok) alert('Failed to delete snap.');
 }
 
@@ -206,7 +232,7 @@ function updateSnapMarker(id, name) {
 async function reconcileSnaps({ fitToBounds = false } = {}) {
   let snaps;
   try {
-    const res = await fetch('/snaps');
+    const res = await apiFetch('/snaps');
     snaps = await res.json();
   } catch (e) {
     console.error('Failed to load snaps', e);
@@ -243,7 +269,11 @@ async function loadSnaps() {
 }
 
 function connectEvents() {
-  const es = new EventSource('/events');
+  // EventSource cannot set headers, so the token travels as a query
+  // parameter. No stored token means the initial GET /snaps succeeded
+  // without one (server is open) — connect bare.
+  const token = getApiToken();
+  const es = new EventSource(token ? '/events?token=' + encodeURIComponent(token) : '/events');
   let wasDisconnected = false;
 
   es.addEventListener('open', () => {
@@ -279,5 +309,6 @@ function connectEvents() {
   es.onerror = () => { wasDisconnected = true; };
 }
 
-loadSnaps();
-connectEvents();
+// Wait for the initial load: if it had to prompt for a token, the SSE
+// connection below needs that token too.
+loadSnaps().then(connectEvents);

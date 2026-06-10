@@ -51,13 +51,29 @@ func New(cfg *config.Config, h *handler.SnapHandler, ev *hub.Hub, hh *handler.He
 			r.Use(debugBodyLogger)
 		}
 
-		r.Post("/snaps", h.CreateSnap)
-		r.Get("/snaps", h.ListSnaps)
-		r.Patch("/snaps/{id}", h.UpdateSnap)
-		r.Delete("/snaps/{id}", h.DeleteSnap)
-		r.Get("/photos/{token}", h.ServePhoto)
-		r.Get("/events", ev.ServeSSE)
+		// Token-protected endpoints: everything that creates, mutates, lists,
+		// or streams snap data. Auth is opt-in — with no API_TOKEN configured
+		// the middleware is not installed and behavior is unchanged.
+		r.Group(func(r chi.Router) {
+			if cfg.APIToken != "" {
+				r.Use(requireAuth(cfg.APIToken))
+			}
+			r.Post("/snaps", h.CreateSnap)
+			r.Get("/snaps", h.ListSnaps)
+			r.Patch("/snaps/{id}", h.UpdateSnap)
+			r.Delete("/snaps/{id}", h.DeleteSnap)
+			r.Get("/events", ev.ServeSSE)
+		})
 
+		// Deliberately unauthenticated:
+		//   - /photos/{token}: already capability URLs — each photo is reachable
+		//     only via an unguessable per-photo token, and <img> tags cannot
+		//     send Authorization headers anyway.
+		//   - static files: the map page itself is not secret; the snap data
+		//     it loads is what the token protects.
+		// (/healthz and /metrics live outside this group: orchestrator health
+		// checks and the metrics scraper must keep working without credentials.)
+		r.Get("/photos/{token}", h.ServePhoto)
 		r.Handle("/*", http.FileServer(http.FS(staticFS)))
 	})
 
