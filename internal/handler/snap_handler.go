@@ -1,11 +1,6 @@
 package handler
 
 import (
-	"bytes"
-	"context"
-	"crypto/rand"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,10 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/williamokano/sentinelsnap/internal/config"
 	"github.com/williamokano/sentinelsnap/internal/domain"
-	"github.com/williamokano/sentinelsnap/internal/hub"
-	"github.com/williamokano/sentinelsnap/internal/observability"
-	"github.com/williamokano/sentinelsnap/internal/repository"
-	"github.com/williamokano/sentinelsnap/internal/storage"
+	"github.com/williamokano/sentinelsnap/internal/service"
 )
 
 const (
@@ -32,15 +24,12 @@ const (
 )
 
 type SnapHandler struct {
-	repo    repository.SnapRepository
-	storage storage.StorageProvider
-	hub     *hub.Hub
-	cfg     *config.Config
-	metrics *observability.AppMetrics
+	svc *service.SnapService
+	cfg *config.Config
 }
 
-func NewSnapHandler(repo repository.SnapRepository, store storage.StorageProvider, h *hub.Hub, cfg *config.Config, metrics *observability.AppMetrics) *SnapHandler {
-	return &SnapHandler{repo: repo, storage: store, hub: h, cfg: cfg, metrics: metrics}
+func NewSnapHandler(svc *service.SnapService, cfg *config.Config) *SnapHandler {
+	return &SnapHandler{svc: svc, cfg: cfg}
 }
 
 // flexFloat64 unmarshals from both JSON number and string,
@@ -71,130 +60,74 @@ type createSnapRequest struct {
 	Photos    []string    `json:"photos"`
 }
 
-func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxSnapBodyBytes)
-
-	var req createSnapRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+// decodeJSONBody decodes the request body into v, translating the
+// MaxBytesReader limit into a 413 and malformed JSON into a 400. It reports
+// whether decoding succeeded; on failure the response has been written.
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, v any) bool {
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
 		var maxBytesErr *http.MaxBytesError
 		if errors.As(err, &maxBytesErr) {
 			writeError(w, http.StatusRequestEntityTooLarge,
 				fmt.Sprintf("request body exceeds %d bytes", maxBytesErr.Limit))
-			return
+			return false
 		}
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return false
+	}
+	return true
+}
+
+// writeServiceError maps service-layer errors onto HTTP responses:
+// validation failures become 400s carrying the message, missing entities
+// become 404s, and anything else is a 500 with the generic fallback message.
+func writeServiceError(w http.ResponseWriter, err error, notFoundMsg, fallbackMsg string) {
+	var ve *service.ValidationError
+	switch {
+	case errors.As(err, &ve):
+		writeError(w, http.StatusBadRequest, ve.Msg)
+	case errors.Is(err, domain.ErrNotFound):
+		writeError(w, http.StatusNotFound, notFoundMsg)
+	default:
+		writeError(w, http.StatusInternalServerError, fallbackMsg)
+	}
+}
+
+func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxSnapBodyBytes)
+
+	var req createSnapRequest
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 
-	if req.Latitude == 0 && req.Longitude == 0 {
-		writeError(w, http.StatusBadRequest, "latitude and longitude are required")
-		return
-	}
-	if len(req.Photos) == 0 {
-		writeError(w, http.StatusBadRequest, "at least one photo is required")
-		return
-	}
 	if len(req.Photos) > maxPhotosPerSnap {
 		writeError(w, http.StatusBadRequest,
 			fmt.Sprintf("at most %d photos per snap, got %d", maxPhotosPerSnap, len(req.Photos)))
 		return
 	}
 
-	ctx := r.Context()
-
-	snapID, err := h.repo.CreateSnap(ctx, &domain.Snap{
+	snap, err := h.svc.CreateSnap(r.Context(), service.CreateSnapInput{
 		Latitude:  float64(req.Latitude),
 		Longitude: float64(req.Longitude),
+		Photos:    req.Photos,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not create snap")
+		writeServiceError(w, err, "snap not found", "could not create snap")
 		return
 	}
 
-	var storedKeys []string
-	var photos []domain.Photo
-
-	rollback := func() {
-		bg := context.Background()
-		for _, key := range storedKeys {
-			if err := h.storage.Delete(bg, key); err != nil {
-				slog.ErrorContext(bg, "rollback: failed to delete stored photo",
-					"key", key, "snap_id", snapID, "error", err)
-			}
-		}
-		if err := h.repo.DeleteSnap(bg, snapID); err != nil {
-			slog.ErrorContext(bg, "rollback: failed to delete snap record",
-				"snap_id", snapID, "error", err)
-		}
-	}
-
-	for i, data := range req.Photos {
-		raw, err := base64.StdEncoding.DecodeString(data)
-		if err != nil {
-			rollback()
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid base64 for photo %d: %s", i, err))
-			return
-		}
-
-		ct := http.DetectContentType(raw)
-		token := randomID()
-		key := fmt.Sprintf("photos/%s%s", token, extForContentType(ct))
-
-		if err := h.storage.Put(ctx, key, bytes.NewReader(raw), ct); err != nil {
-			rollback()
-			writeError(w, http.StatusInternalServerError, "could not store photo")
-			return
-		}
-		storedKeys = append(storedKeys, key)
-
-		photoID, err := h.repo.AddPhoto(ctx, &domain.Photo{
-			SnapID:    snapID,
-			StoredKey: key,
-			Token:     token,
-		})
-		if err != nil {
-			rollback()
-			writeError(w, http.StatusInternalServerError, "could not save photo metadata")
-			return
-		}
-
-		h.metrics.PhotoStored(ctx, int64(len(raw)))
-
-		photos = append(photos, domain.Photo{
-			ID:        photoID,
-			SnapID:    snapID,
-			Token:     token,
-			URL:       fmt.Sprintf("/photos/%s", token),
-			StoredKey: key,
-		})
-	}
-
-	snap := domain.Snap{
-		ID:        snapID,
-		Latitude:  float64(req.Latitude),
-		Longitude: float64(req.Longitude),
-		Photos:    photos,
-	}
-	h.metrics.SnapCreated(ctx)
-	h.hub.Broadcast(ctx, hub.EventSnapCreated, snap)
 	writeJSON(w, http.StatusCreated, snap)
 }
 
 func (h *SnapHandler) ServePhoto(w http.ResponseWriter, r *http.Request) {
 	token := chi.URLParam(r, "token")
-	photo, err := h.repo.GetPhotoByToken(r.Context(), token)
+	rc, ct, err := h.svc.GetPhoto(r.Context(), token)
 	if err != nil {
-		if err == domain.ErrNotFound {
+		if errors.Is(err, domain.ErrNotFound) {
 			http.NotFound(w, r)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "could not fetch photo")
-		return
-	}
-
-	rc, ct, err := h.storage.Get(r.Context(), photo.StoredKey)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read photo")
 		return
 	}
 	defer func() { _ = rc.Close() }()
@@ -217,31 +150,15 @@ func (h *SnapHandler) UpdateSnap(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name string `json:"name"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
-			writeError(w, http.StatusRequestEntityTooLarge,
-				fmt.Sprintf("request body exceeds %d bytes", maxBytesErr.Limit))
-			return
-		}
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return
-	}
-	if len(req.Name) > 100 {
-		writeError(w, http.StatusBadRequest, "name must be 100 characters or fewer")
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 
-	if err := h.repo.UpdateSnapName(r.Context(), id, req.Name); err != nil {
-		if err == domain.ErrNotFound {
-			writeError(w, http.StatusNotFound, "snap not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "could not update snap")
+	if err := h.svc.RenameSnap(r.Context(), id, req.Name); err != nil {
+		writeServiceError(w, err, "snap not found", "could not update snap")
 		return
 	}
 
-	h.hub.Broadcast(r.Context(), hub.EventSnapUpdated, map[string]any{"id": id, "name": req.Name})
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "name": req.Name})
 }
 
@@ -252,41 +169,19 @@ func (h *SnapHandler) DeleteSnap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	snap, err := h.repo.GetSnapByID(r.Context(), id)
-	if err != nil {
-		if err == domain.ErrNotFound {
-			writeError(w, http.StatusNotFound, "snap not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "could not fetch snap")
+	if err := h.svc.DeleteSnap(r.Context(), id); err != nil {
+		writeServiceError(w, err, "snap not found", "could not delete snap")
 		return
 	}
 
-	for _, p := range snap.Photos {
-		if err := h.storage.Delete(r.Context(), p.StoredKey); err != nil {
-			slog.WarnContext(r.Context(), "failed to delete stored file", "key", p.StoredKey, "error", err)
-		}
-	}
-
-	if err := h.repo.DeleteSnap(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not delete snap")
-		return
-	}
-
-	h.hub.Broadcast(r.Context(), hub.EventSnapDeleted, map[string]int64{"id": id})
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *SnapHandler) ListSnaps(w http.ResponseWriter, r *http.Request) {
-	snaps, err := h.repo.ListSnaps(r.Context())
+	snaps, err := h.svc.ListSnaps(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not list snaps")
 		return
-	}
-	for i := range snaps {
-		for j := range snaps[i].Photos {
-			snaps[i].Photos[j].URL = fmt.Sprintf("/photos/%s", snaps[i].Photos[j].Token)
-		}
 	}
 	writeJSON(w, http.StatusOK, snaps)
 }
@@ -301,25 +196,4 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
-}
-
-func randomID() string {
-	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
-}
-
-func extForContentType(ct string) string {
-	switch ct {
-	case "image/jpeg":
-		return ".jpg"
-	case "image/png":
-		return ".png"
-	case "image/gif":
-		return ".gif"
-	case "image/webp":
-		return ".webp"
-	default:
-		return ""
-	}
 }

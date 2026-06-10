@@ -53,34 +53,6 @@ func (r *snapRepository) CreateSnapWithPhotos(ctx context.Context, snap *domain.
 	return nil
 }
 
-// Deprecated: use CreateSnapWithPhotos so the snap and its photos are written
-// atomically.
-func (r *snapRepository) CreateSnap(ctx context.Context, snap *domain.Snap) (int64, error) {
-	var id int64
-	err := r.db.QueryRowContext(ctx,
-		`INSERT INTO snaps (latitude, longitude) VALUES ($1, $2) RETURNING id`,
-		snap.Latitude, snap.Longitude,
-	).Scan(&id)
-	if err != nil {
-		return 0, fmt.Errorf("create snap: %w", err)
-	}
-	return id, nil
-}
-
-// Deprecated: use CreateSnapWithPhotos so the snap and its photos are written
-// atomically.
-func (r *snapRepository) AddPhoto(ctx context.Context, photo *domain.Photo) (int64, error) {
-	var id int64
-	err := r.db.QueryRowContext(ctx,
-		`INSERT INTO photos (snap_id, stored_key, token) VALUES ($1, $2, $3) RETURNING id`,
-		photo.SnapID, photo.StoredKey, photo.Token,
-	).Scan(&id)
-	if err != nil {
-		return 0, fmt.Errorf("add photo: %w", err)
-	}
-	return id, nil
-}
-
 func (r *snapRepository) DeleteSnap(ctx context.Context, id int64) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM snaps WHERE id = $1`, id)
 	return err
