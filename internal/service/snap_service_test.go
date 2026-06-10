@@ -338,7 +338,7 @@ func TestGetPhoto_Success(t *testing.T) {
 	rc, ct, err := newService(repo, store).GetPhoto(context.Background(), "abc")
 
 	require.NoError(t, err)
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	assert.Equal(t, "image/jpeg", ct)
 	data, err := io.ReadAll(rc)
 	require.NoError(t, err)

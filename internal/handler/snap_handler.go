@@ -16,11 +16,10 @@ import (
 )
 
 const (
-	// maxSnapBodyBytes caps POST /snaps bodies: up to maxPhotosPerSnap base64
-	// photos plus JSON overhead fit comfortably within 50 MiB.
+	// maxSnapBodyBytes caps POST /snaps bodies: the service's photo-count cap
+	// worth of base64 photos plus JSON overhead fit comfortably within 50 MiB.
 	maxSnapBodyBytes   = 50 << 20
 	maxUpdateBodyBytes = 1 << 20
-	maxPhotosPerSnap   = 10
 )
 
 type SnapHandler struct {
@@ -97,12 +96,6 @@ func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 
 	var req createSnapRequest
 	if !decodeJSONBody(w, r, &req) {
-		return
-	}
-
-	if len(req.Photos) > maxPhotosPerSnap {
-		writeError(w, http.StatusBadRequest,
-			fmt.Sprintf("at most %d photos per snap, got %d", maxPhotosPerSnap, len(req.Photos)))
 		return
 	}
 

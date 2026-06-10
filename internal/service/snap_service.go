@@ -38,6 +38,10 @@ const sniffLen = 512
 
 const maxSnapNameLen = 100
 
+// maxPhotosPerSnap caps how many photos a single snap may carry; enforced
+// here so every caller of the service gets the same rule, not just HTTP.
+const maxPhotosPerSnap = 10
+
 type SnapService struct {
 	repo    repository.SnapRepository
 	storage storage.StorageProvider
@@ -70,6 +74,9 @@ func (s *SnapService) CreateSnap(ctx context.Context, in CreateSnapInput) (*doma
 	}
 	if len(in.Photos) == 0 {
 		return nil, &ValidationError{Msg: "at least one photo is required"}
+	}
+	if len(in.Photos) > maxPhotosPerSnap {
+		return nil, &ValidationError{Msg: fmt.Sprintf("at most %d photos per snap, got %d", maxPhotosPerSnap, len(in.Photos))}
 	}
 
 	var storedKeys []string
