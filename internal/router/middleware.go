@@ -50,13 +50,15 @@ func securityHeaders(cfg *config.Config) func(http.Handler) http.Handler {
 // Callers must only install this middleware with a non-empty token; an empty
 // token means authentication is disabled.
 func requireAuth(token string) func(http.Handler) http.Handler {
+	// Converted once here rather than per request inside the handler.
+	tokenBytes := []byte(token)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			presented, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 			if !ok {
 				presented = r.URL.Query().Get("token")
 			}
-			if subtle.ConstantTimeCompare([]byte(presented), []byte(token)) != 1 {
+			if subtle.ConstantTimeCompare([]byte(presented), tokenBytes) != 1 {
 				w.Header().Set("WWW-Authenticate", "Bearer")
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusUnauthorized)
