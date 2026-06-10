@@ -112,12 +112,21 @@ function snapLabel(snap) {
   return snap.name || ('Snap #' + snap.id);
 }
 
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function buildPopup(snap) {
   const photosHtml = (snap.photos || []).map(p =>
-    `<img src="${p.url}" alt="photo" />`
+    `<img src="${escapeHtml(p.url)}" alt="photo" />`
   ).join('');
   return `
-    <span class="popup-title" id="snap-title-${snap.id}">${snapLabel(snap)}</span>
+    <span class="popup-title" id="snap-title-${snap.id}">${escapeHtml(snapLabel(snap))}</span>
     <div class="popup-meta">${formatDate(snap.created_at)}<br/>${snap.latitude.toFixed(5)}, ${snap.longitude.toFixed(5)}</div>
     <div class="popup-photos">${photosHtml || '<em>No photos</em>'}</div>
     <div class="popup-actions">
@@ -189,7 +198,12 @@ function updateSnapMarker(id, name) {
   entry.marker.setPopupContent(buildPopup(entry.snap));
 }
 
-async function loadSnaps() {
+// Fetch the full snap list and bring local state in sync with it:
+// add markers we are missing, update names that changed, and remove
+// markers whose snaps no longer exist on the server. Used both for the
+// initial load and to reconcile after an SSE reconnect, since events
+// broadcast while disconnected are lost (EventSource does not replay).
+async function reconcileSnaps({ fitToBounds = false } = {}) {
   let snaps;
   try {
     const res = await fetch('/snaps');
@@ -198,23 +212,47 @@ async function loadSnaps() {
     console.error('Failed to load snaps', e);
     return;
   }
+  snaps = snaps || [];
 
-  if (!snaps || snaps.length === 0) return;
-
-  const bounds = [];
+  const seen = new Set();
   snaps.forEach(snap => {
-    addSnapMarker(snap);
-    bounds.push([snap.latitude, snap.longitude]);
+    seen.add(snap.id);
+    const entry = entries.get(snap.id);
+    if (!entry) {
+      addSnapMarker(snap);
+    } else if (entry.snap.name !== snap.name) {
+      updateSnapMarker(snap.id, snap.name);
+    }
   });
 
-  map.addLayer(clusterGroup);
-  if (bounds.length > 0) {
-    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+  // Remove markers for snaps deleted while we were disconnected.
+  for (const [id, entry] of [...entries]) {
+    if (seen.has(id)) continue;
+    withSpiderfyPreserved(() => { clusterGroup.removeLayer(entry.marker); entries.delete(id); });
   }
+
+  if (snaps.length === 0) return;
+  map.addLayer(clusterGroup);
+  if (fitToBounds) {
+    map.fitBounds(snaps.map(s => [s.latitude, s.longitude]), { padding: [40, 40], maxZoom: 14 });
+  }
+}
+
+async function loadSnaps() {
+  await reconcileSnaps({ fitToBounds: true });
 }
 
 function connectEvents() {
   const es = new EventSource('/events');
+  let wasDisconnected = false;
+
+  es.addEventListener('open', () => {
+    if (!wasDisconnected) return; // initial connection: loadSnaps() covers it
+    wasDisconnected = false;
+    // Events broadcast while we were disconnected are gone for good, so
+    // resync the whole map from the server.
+    reconcileSnaps();
+  });
 
   es.addEventListener('snap', e => {
     const snap = JSON.parse(e.data);
@@ -238,7 +276,7 @@ function connectEvents() {
     showToast(`Snap #${id} deleted`, 'danger');
   });
 
-  es.onerror = () => {};
+  es.onerror = () => { wasDisconnected = true; };
 }
 
 loadSnaps();

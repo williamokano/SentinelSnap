@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/williamokano/sentinelsnap/internal/observability"
 )
@@ -15,6 +16,12 @@ const (
 	EventSnapUpdated = "snap_updated"
 	EventSnapDeleted = "snap_deleted"
 )
+
+// heartbeatInterval controls how often ServeSSE writes a keepalive comment.
+// Reverse proxies and load balancers reap idle connections, so the stream
+// must carry periodic traffic even when no events are broadcast. It is a
+// variable so tests can shorten it.
+var heartbeatInterval = 30 * time.Second
 
 type Hub struct {
 	mu      sync.Mutex
@@ -90,13 +97,23 @@ func (h *Hub) ServeSSE(w http.ResponseWriter, r *http.Request) {
 		h.mu.Unlock()
 	}()
 
+	ticker := time.NewTicker(heartbeatInterval)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case msg, ok := <-ch:
 			if !ok {
 				return
 			}
-			w.Write(msg)
+			if _, err := w.Write(msg); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-ticker.C:
+			if _, err := w.Write([]byte(": ping\n\n")); err != nil {
+				return
+			}
 			flusher.Flush()
 		case <-r.Context().Done():
 			return
