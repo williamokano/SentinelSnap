@@ -50,6 +50,53 @@ func TestSecurityHeaders(t *testing.T) {
 	}
 }
 
+func TestRequireAuth(t *testing.T) {
+	tests := []struct {
+		name       string
+		configured string // empty = auth disabled, middleware not installed
+		authHeader string
+		query      string
+		wantStatus int
+	}{
+		{"no token configured - no credentials pass", "", "", "", http.StatusOK},
+		{"no token configured - stale credentials still pass", "", "Bearer whatever", "", http.StatusOK},
+		{"token configured - no credentials rejected", "s3cret", "", "", http.StatusUnauthorized},
+		{"token configured - wrong bearer token rejected", "s3cret", "Bearer wrong", "", http.StatusUnauthorized},
+		{"token configured - malformed authorization header rejected", "s3cret", "s3cret", "", http.StatusUnauthorized},
+		{"token configured - wrong query token rejected", "s3cret", "", "?token=wrong", http.StatusUnauthorized},
+		{"token configured - correct bearer token passes", "s3cret", "Bearer s3cret", "", http.StatusOK},
+		{"token configured - correct query token passes (SSE)", "s3cret", "", "?token=s3cret", http.StatusOK},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			})
+			// Mirror router.New: the middleware is only installed when a
+			// token is configured; otherwise the server stays fully open.
+			var handler http.Handler = next
+			if tc.configured != "" {
+				handler = requireAuth(tc.configured)(next)
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/snaps"+tc.query, nil)
+			if tc.authHeader != "" {
+				req.Header.Set("Authorization", tc.authHeader)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			assert.Equal(t, tc.wantStatus, rec.Code)
+			if tc.wantStatus == http.StatusUnauthorized {
+				assert.Equal(t, "Bearer", rec.Header().Get("WWW-Authenticate"))
+				assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+				assert.JSONEq(t, `{"error":"unauthorized"}`, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestSlogRequestLogger_PanicLoggedAs500(t *testing.T) {
 	var buf bytes.Buffer
 	prev := slog.Default()

@@ -14,6 +14,11 @@ type Config struct {
 	HTTPSEnabled           bool
 	ShutdownTimeoutSeconds int
 
+	// APIToken, when non-empty, is required as a bearer token (or ?token=
+	// query parameter for SSE) on the snap and event endpoints. Empty
+	// disables authentication entirely — the server is fully open.
+	APIToken string
+
 	DBDriver string
 	DBDSN    string
 
@@ -58,6 +63,7 @@ func Load() (*Config, error) {
 		Debug:                  os.Getenv("DEBUG") == "true" || os.Getenv("DEBUG") == "1",
 		HTTPSEnabled:           httpsEnabled,
 		ShutdownTimeoutSeconds: shutdownTimeout,
+		APIToken:               os.Getenv("API_TOKEN"),
 		DBDriver:               getEnv("DB_DRIVER", "postgres"),
 		DBDSN:                  dsn,
 		StorageBackend:         getEnv("STORAGE_BACKEND", "local"),

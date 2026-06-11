@@ -2,8 +2,10 @@ package router
 
 import (
 	"context"
+	"crypto/subtle"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -32,6 +34,36 @@ func securityHeaders(cfg *config.Config) func(http.Handler) http.Handler {
 			w.Header().Set("Permissions-Policy", "geolocation=(), camera=(), microphone=()")
 			if cfg.HTTPSEnabled {
 				w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// requireAuth returns a middleware that rejects requests not carrying the
+// configured static token, either as "Authorization: Bearer <token>" or as a
+// "?token=<token>" query parameter. The query form exists because EventSource
+// cannot set request headers, so SSE clients have no other way to
+// authenticate. Comparison is constant-time so attackers cannot recover the
+// token byte-by-byte through response timing.
+//
+// Callers must only install this middleware with a non-empty token; an empty
+// token means authentication is disabled.
+func requireAuth(token string) func(http.Handler) http.Handler {
+	// Converted once here rather than per request inside the handler.
+	tokenBytes := []byte(token)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			presented, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+			if !ok {
+				presented = r.URL.Query().Get("token")
+			}
+			if subtle.ConstantTimeCompare([]byte(presented), tokenBytes) != 1 {
+				w.Header().Set("WWW-Authenticate", "Bearer")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+				return
 			}
 			next.ServeHTTP(w, r)
 		})
