@@ -22,6 +22,7 @@ import (
 	"github.com/williamokano/sentinelsnap/internal/observability"
 	"github.com/williamokano/sentinelsnap/internal/repository/postgres"
 	"github.com/williamokano/sentinelsnap/internal/router"
+	"github.com/williamokano/sentinelsnap/internal/service"
 	"github.com/williamokano/sentinelsnap/internal/storage"
 	"github.com/williamokano/sentinelsnap/internal/storage/local"
 	"github.com/williamokano/sentinelsnap/migrations"
@@ -96,7 +97,8 @@ func main() {
 		slog.Error("sse clients gauge", "error", err)
 		os.Exit(1)
 	}
-	h := handler.NewSnapHandler(repo, store, ev, cfg, obs.AppMetrics)
+	svc := service.NewSnapService(repo, store, ev, obs.AppMetrics)
+	h := handler.NewSnapHandler(svc, cfg)
 	hh := handler.NewHealthHandler(db)
 	r := router.New(cfg, h, ev, hh, obs.MetricsHandler)
 

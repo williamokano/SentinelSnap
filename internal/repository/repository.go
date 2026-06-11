@@ -7,8 +7,10 @@ import (
 )
 
 type SnapRepository interface {
-	CreateSnap(ctx context.Context, snap *domain.Snap) (int64, error)
-	AddPhoto(ctx context.Context, photo *domain.Photo) (int64, error)
+	// CreateSnapWithPhotos inserts the snap row and all photo rows in a
+	// single transaction, populating the generated IDs (and each photo's
+	// SnapID) back onto the passed structs.
+	CreateSnapWithPhotos(ctx context.Context, snap *domain.Snap, photos []domain.Photo) error
 	DeleteSnap(ctx context.Context, id int64) error
 	UpdateSnapName(ctx context.Context, id int64, name string) error
 	ListSnaps(ctx context.Context) ([]domain.Snap, error)
