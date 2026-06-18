@@ -171,6 +171,29 @@ func (h *SnapHandler) ServePhoto(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ServePhotoThumb serves a small JPEG thumbnail for the photo identified by
+// {token}, generating and caching it on first request. Thumbnails are not
+// counted as views.
+func (h *SnapHandler) ServePhotoThumb(w http.ResponseWriter, r *http.Request) {
+	token := chi.URLParam(r, "token")
+	rc, err := h.svc.GetPhotoThumb(r.Context(), token)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "could not generate thumbnail")
+		return
+	}
+	defer func() { _ = rc.Close() }()
+
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	if _, err := io.Copy(w, rc); err != nil {
+		slog.WarnContext(r.Context(), "failed to stream thumbnail", "token", token, "error", err)
+	}
+}
+
 func (h *SnapHandler) UpdateSnap(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {

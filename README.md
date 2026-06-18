@@ -314,6 +314,14 @@ Stream a photo by its random token. Tokens are generated at upload time and stor
 
 ---
 
+### `GET /photos/{token}/thumb`
+
+Stream a small JPEG thumbnail (max 400 px on the longest edge) of the photo. The feed loads these instead of the full images so a page of phone-sized (~5 MB) photos stays fast; clicking a thumbnail opens the full-resolution original via `GET /photos/{token}`.
+
+The thumbnail is generated lazily the **first** time it is requested, then written to storage and recorded on the photo row; every later request streams that stored file instead of re-decoding the original. The first feed load thus backfills thumbnails for any pre-existing photos as a one-time cost. Thumbnail fetches do **not** increment the view counter. Like `GET /photos/{token}`, this endpoint is unauthenticated — the unguessable token is the capability.
+
+---
+
 ### `GET /healthz`
 
 Health check endpoint. Returns `200` when the server is up and the database is reachable, or `503` when the database ping fails.

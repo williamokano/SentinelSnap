@@ -70,3 +70,7 @@ func (m *SnapRepository) CountPhotosForSnap(ctx context.Context, snapID int64) (
 func (m *SnapRepository) IncrementPhotoViews(ctx context.Context, token string) error {
 	return m.Called(ctx, token).Error(0)
 }
+
+func (m *SnapRepository) SetPhotoThumbKey(ctx context.Context, id int64, thumbKey string) error {
+	return m.Called(ctx, id, thumbKey).Error(0)
+}

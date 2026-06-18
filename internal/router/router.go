@@ -82,6 +82,7 @@ func New(cfg *config.Config, h *handler.SnapHandler, ev *hub.Hub, hh *handler.He
 		// (/healthz and /metrics live outside this group: orchestrator health
 		// checks and the metrics scraper must keep working without credentials.)
 		r.Get("/photos/{token}", h.ServePhoto)
+		r.Get("/photos/{token}/thumb", h.ServePhotoThumb)
 		// Clean URL for the photo feed page; the file itself also remains
 		// reachable at /feed.html via the static file server below.
 		r.Get("/feed", func(w http.ResponseWriter, r *http.Request) {

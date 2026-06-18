@@ -22,6 +22,7 @@ type Photo struct {
 	Token     string    `db:"token"      json:"-"`
 	URL       string    `db:"-"          json:"url"`
 	StoredKey string    `db:"stored_key" json:"-"`
+	ThumbKey  *string   `db:"thumb_key"  json:"-"`
 	ViewCount int64     `db:"view_count" json:"-"`
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
