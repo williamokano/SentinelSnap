@@ -22,6 +22,7 @@ import (
 	"github.com/williamokano/sentinelsnap/internal/observability"
 	"github.com/williamokano/sentinelsnap/internal/repository"
 	"github.com/williamokano/sentinelsnap/internal/storage"
+	"github.com/williamokano/sentinelsnap/internal/thumbnail"
 )
 
 // ValidationError reports invalid caller input. Handlers map it to a 400
@@ -336,6 +337,30 @@ func (s *SnapService) GetPhoto(ctx context.Context, token string) (io.ReadCloser
 		slog.WarnContext(ctx, "failed to increment photo view count", "token", token, "error", err)
 	}
 	return rc, ct, nil
+}
+
+// GetPhotoThumb generates and returns a JPEG thumbnail for the photo addressed
+// by token. It does not increment the view count — thumbnails are auto-loaded
+// in the feed and should not count as deliberate views. The caller owns closing
+// the returned reader.
+func (s *SnapService) GetPhotoThumb(ctx context.Context, token string, maxSide int) (io.ReadCloser, error) {
+	photo, err := s.repo.GetPhotoByToken(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+	rc, _, err := s.storage.Get(ctx, photo.StoredKey)
+	if err != nil {
+		return nil, fmt.Errorf("read photo %q: %w", token, err)
+	}
+
+	// Stream through the thumbnail encoder via a pipe so we never buffer the
+	// full original in memory.
+	pr, pw := io.Pipe()
+	go func() {
+		defer rc.Close()
+		pw.CloseWithError(thumbnail.Encode(rc, pw, maxSide))
+	}()
+	return pr, nil
 }
 
 func photoURL(token string) string {

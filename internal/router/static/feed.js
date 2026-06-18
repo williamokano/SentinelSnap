@@ -18,10 +18,15 @@ function updateEmptyState() {
   emptyEl.hidden = cards.size > 0;
 }
 
+function thumbUrl(photoUrl) {
+  return photoUrl + '/thumb';
+}
+
 function buildCard(photo) {
   const card = document.createElement('article');
   card.className = 'feed-card';
   card.dataset.photoId = photo.id;
+  card.dataset.fullUrl = photo.url;
   if (photo.snap_id != null) card.dataset.snapId = photo.snap_id;
 
   card.innerHTML = `
@@ -34,7 +39,7 @@ function buildCard(photo) {
         </div>
       </div>
     </div>
-    <img class="feed-img" src="${escapeHtml(photo.url)}" alt="photo" loading="lazy" />
+    <img class="feed-img" src="${escapeHtml(thumbUrl(photo.url))}" alt="photo" loading="lazy" />
   `;
   return card;
 }
@@ -97,7 +102,8 @@ document.addEventListener('click', e => {
 
   const img = e.target.closest('.feed-img');
   if (img) {
-    openViewer(img.src);
+    const card = img.closest('.feed-card');
+    openViewer(card ? card.dataset.fullUrl : img.src);
     return;
   }
 
@@ -110,12 +116,18 @@ function closeAllMenus() {
   document.querySelectorAll('.feed-menu-btn').forEach(b => b.setAttribute('aria-expanded', 'false'));
 }
 
-// ---- Zoomable viewer (pan + wheel/double-click/pinch zoom) ----
+// ---- Zoomable viewer (pan + wheel zoom / double-click / pinch-zoom) ----
+//
+// Touch events are used for mobile (touchstart/move/end) so we can call
+// preventDefault() reliably — pointer events cannot preventDefault on passive
+// touch handlers in most browsers. Mouse events handle desktop drag; wheel
+// handles scroll-to-zoom on desktop.
 
 const viewer = document.getElementById('viewer');
+const viewerStage = document.getElementById('viewer-stage');
 const viewerImg = document.getElementById('viewer-img');
 const MIN_SCALE = 1;
-const MAX_SCALE = 6;
+const MAX_SCALE = 8;
 let vScale = 1, vX = 0, vY = 0;
 
 function applyTransform() {
@@ -127,6 +139,25 @@ function resetTransform() {
   applyTransform();
 }
 
+function clampScale(s) { return Math.min(MAX_SCALE, Math.max(MIN_SCALE, s)); }
+
+function imgCenter() {
+  const r = viewerImg.getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+}
+
+function zoomAt(clientX, clientY, newScale) {
+  const prev = vScale;
+  vScale = clampScale(newScale);
+  const c = imgCenter();
+  const cx = clientX - c.x;
+  const cy = clientY - c.y;
+  vX -= cx * (vScale / prev - 1);
+  vY -= cy * (vScale / prev - 1);
+  if (vScale === MIN_SCALE) { vX = 0; vY = 0; }
+  applyTransform();
+}
+
 function openViewer(src) {
   viewerImg.src = src;
   resetTransform();
@@ -135,98 +166,116 @@ function openViewer(src) {
 
 function closeViewer() {
   viewer.classList.remove('open');
+  viewerImg.src = '';
 }
 
 document.getElementById('viewer-close').addEventListener('click', closeViewer);
-viewer.addEventListener('click', e => { if (e.target === viewer) closeViewer(); });
+viewer.addEventListener('click', e => { if (e.target === viewer || e.target === viewerStage) closeViewer(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeViewer(); });
 
-function clampScale(s) { return Math.min(MAX_SCALE, Math.max(MIN_SCALE, s)); }
+// ---- Mouse: drag to pan ----
+let mousePan = null;
 
-// Wheel zoom, anchored on the cursor.
+viewerImg.addEventListener('mousedown', e => {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  mousePan = { ox: vX - e.clientX, oy: vY - e.clientY };
+});
+
+window.addEventListener('mousemove', e => {
+  if (!mousePan || vScale <= MIN_SCALE) return;
+  vX = e.clientX + mousePan.ox;
+  vY = e.clientY + mousePan.oy;
+  applyTransform();
+});
+
+window.addEventListener('mouseup', () => { mousePan = null; });
+
+// Double-click to toggle 2.5× zoom at click point.
+viewerImg.addEventListener('dblclick', e => {
+  if (vScale > MIN_SCALE) resetTransform();
+  else zoomAt(e.clientX, e.clientY, 2.5);
+});
+
+// ---- Wheel: zoom anchored on cursor ----
 viewer.addEventListener('wheel', e => {
   if (!viewer.classList.contains('open')) return;
   e.preventDefault();
-  const prev = vScale;
-  vScale = clampScale(vScale * (e.deltaY < 0 ? 1.15 : 1 / 1.15));
-  const rect = viewerImg.getBoundingClientRect();
-  const cx = e.clientX - (rect.left + rect.width / 2);
-  const cy = e.clientY - (rect.top + rect.height / 2);
-  const ratio = vScale / prev - 1;
-  vX -= cx * ratio;
-  vY -= cy * ratio;
-  if (vScale === MIN_SCALE) { vX = 0; vY = 0; }
-  applyTransform();
+  zoomAt(e.clientX, e.clientY, vScale * (e.deltaY < 0 ? 1.15 : 1 / 1.15));
 }, { passive: false });
 
-// Double-click / double-tap toggles between fit and 2.5x.
-viewerImg.addEventListener('dblclick', () => {
-  if (vScale > MIN_SCALE) resetTransform();
-  else { vScale = 2.5; applyTransform(); }
-});
+// ---- Touch: single-finger pan, two-finger pinch-zoom ----
 
-// Pointer-based pan (mouse + single touch) and two-pointer pinch zoom.
-const pointers = new Map();
-let panStart = null;
-let pinchStart = null;
+let touches = {}; // pointerId-like keyed by touch.identifier
+let touchPan = null;
+let pinch = null;
 
-viewerImg.addEventListener('pointerdown', e => {
-  viewerImg.setPointerCapture(e.pointerId);
-  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (pointers.size === 1) {
-    panStart = { x: e.clientX - vX, y: e.clientY - vY };
-  } else if (pointers.size === 2) {
-    panStart = null;
-    pinchStart = pinchState();
-  }
-});
-
-viewerImg.addEventListener('pointermove', e => {
-  if (!pointers.has(e.pointerId)) return;
-  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-
-  if (pointers.size === 2 && pinchStart) {
-    const now = pinchState();
-    const prev = vScale;
-    vScale = clampScale(pinchStart.scale * (now.dist / pinchStart.dist));
-    const ratio = vScale / prev - 1;
-    vX -= (pinchStart.cx) * ratio;
-    vY -= (pinchStart.cy) * ratio;
-    applyTransform();
-  } else if (pointers.size === 1 && panStart && vScale > MIN_SCALE) {
-    vX = e.clientX - panStart.x;
-    vY = e.clientY - panStart.y;
-    applyTransform();
-  }
-});
-
-function endPointer(e) {
-  pointers.delete(e.pointerId);
-  if (pointers.size < 2) pinchStart = null;
-  if (pointers.size === 1) {
-    const [p] = pointers.values();
-    panStart = { x: p.x - vX, y: p.y - vY };
-  }
-  if (pointers.size === 0 && vScale === MIN_SCALE) resetTransform();
-}
-viewerImg.addEventListener('pointerup', endPointer);
-viewerImg.addEventListener('pointercancel', endPointer);
-
-// Geometry of the current two-pointer gesture, relative to the image center.
-function pinchState() {
-  const pts = [...pointers.values()];
-  const dx = pts[0].x - pts[1].x;
-  const dy = pts[0].y - pts[1].y;
-  const rect = viewerImg.getBoundingClientRect();
-  const midX = (pts[0].x + pts[1].x) / 2;
-  const midY = (pts[0].y + pts[1].y) / 2;
+function touchMidpoint(t1, t2) {
   return {
-    dist: Math.hypot(dx, dy) || 1,
-    scale: vScale,
-    cx: midX - (rect.left + rect.width / 2),
-    cy: midY - (rect.top + rect.height / 2),
+    x: (t1.clientX + t2.clientX) / 2,
+    y: (t1.clientY + t2.clientY) / 2,
+    dist: Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY) || 1,
   };
 }
+
+viewerImg.addEventListener('touchstart', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    touches[t.identifier] = t;
+  }
+  const ids = Object.keys(touches);
+  if (ids.length === 1) {
+    const t = touches[ids[0]];
+    touchPan = { ox: vX - t.clientX, oy: vY - t.clientY };
+    pinch = null;
+  } else if (ids.length === 2) {
+    touchPan = null;
+    const t1 = touches[ids[0]], t2 = touches[ids[1]];
+    pinch = { ...touchMidpoint(t1, t2), scale: vScale };
+  }
+}, { passive: false });
+
+viewerImg.addEventListener('touchmove', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    touches[t.identifier] = t;
+  }
+  const ids = Object.keys(touches);
+  if (ids.length === 2 && pinch) {
+    const t1 = touches[ids[0]], t2 = touches[ids[1]];
+    const now = touchMidpoint(t1, t2);
+    const newScale = clampScale(pinch.scale * (now.dist / pinch.dist));
+    // Zoom anchored on the pinch midpoint.
+    const prev = vScale;
+    vScale = newScale;
+    vX += (now.x - pinch.x) - (pinch.x - imgCenter().x) * (newScale / prev - 1);
+    vY += (now.y - pinch.y) - (pinch.y - imgCenter().y) * (newScale / prev - 1);
+    applyTransform();
+  } else if (ids.length === 1 && touchPan && vScale > MIN_SCALE) {
+    const t = touches[ids[0]];
+    vX = t.clientX + touchPan.ox;
+    vY = t.clientY + touchPan.oy;
+    applyTransform();
+  }
+}, { passive: false });
+
+function onTouchEnd(e) {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    delete touches[t.identifier];
+  }
+  const ids = Object.keys(touches);
+  pinch = null;
+  if (ids.length === 1) {
+    const t = touches[ids[0]];
+    touchPan = { ox: vX - t.clientX, oy: vY - t.clientY };
+  } else if (ids.length === 0) {
+    touchPan = null;
+    if (vScale <= MIN_SCALE) resetTransform();
+  }
+}
+viewerImg.addEventListener('touchend', onTouchEnd, { passive: false });
+viewerImg.addEventListener('touchcancel', onTouchEnd, { passive: false });
 
 // ---- Loading + live updates ----
 
