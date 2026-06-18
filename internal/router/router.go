@@ -86,12 +86,34 @@ func New(cfg *config.Config, h *handler.SnapHandler, ev *hub.Hub, hh *handler.He
 		// Clean URL for the photo feed page; the file itself also remains
 		// reachable at /feed.html via the static file server below.
 		r.Get("/feed", func(w http.ResponseWriter, r *http.Request) {
+			setNoCache(w)
 			http.ServeFileFS(w, r, staticFS, "feed.html")
 		})
-		r.Handle("/*", http.FileServer(http.FS(staticFS)))
+		// The embedded HTML/JS/CSS have no modtime (so no Last-Modified/ETag
+		// for a browser to revalidate against). Without an explicit directive
+		// a browser can keep running a stale app.js/feed.js after a redeploy,
+		// so force revalidation on every load. These files are a few KB each,
+		// so the cost of re-fetching is negligible.
+		r.Handle("/*", noCacheStatic(http.FileServer(http.FS(staticFS))))
 	})
 
 	return r
+}
+
+// setNoCache marks a response as always-revalidate so browsers never serve a
+// stale copy of an embedded asset after the binary is rebuilt.
+func setNoCache(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-cache")
+}
+
+// noCacheStatic wraps a static file handler, applying setNoCache to every
+// response so rebuilt HTML/JS/CSS is picked up on the next page load rather
+// than being shadowed by the browser's cached copy.
+func noCacheStatic(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		setNoCache(w)
+		next.ServeHTTP(w, r)
+	})
 }
 
 // debugBodyLogPrefixBytes bounds how much of a request body the debug logger
