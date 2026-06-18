@@ -66,7 +66,8 @@ func TestCreateSnap_HappyPath(t *testing.T) {
 			photos := args.Get(2).([]domain.Photo)
 			for i := range photos {
 				photos[i].ID = int64(i + 1)
-				photos[i].SnapID = 42
+				sid := int64(42)
+				photos[i].SnapID = &sid
 			}
 		}).
 		Return(nil).Once()
@@ -79,7 +80,8 @@ func TestCreateSnap_HappyPath(t *testing.T) {
 	require.Len(t, snap.Photos, 2)
 	for i, p := range snap.Photos {
 		assert.Equal(t, int64(i+1), p.ID)
-		assert.Equal(t, int64(42), p.SnapID)
+		require.NotNil(t, p.SnapID)
+		assert.Equal(t, int64(42), *p.SnapID)
 		assert.Equal(t, "/photos/"+p.Token, p.URL)
 		assert.Equal(t, "photos/"+p.Token+".png", p.StoredKey)
 		assert.Contains(t, putKeys, p.StoredKey)
@@ -334,6 +336,7 @@ func TestGetPhoto_Success(t *testing.T) {
 	repo.On("GetPhotoByToken", mock.Anything, "abc").Return(photo, nil)
 	store.On("Get", mock.Anything, "photos/abc.jpg").
 		Return(io.NopCloser(strings.NewReader("bytes")), "image/jpeg", nil)
+	repo.On("IncrementPhotoViews", mock.Anything, "abc").Return(nil)
 
 	rc, ct, err := newService(repo, store).GetPhoto(context.Background(), "abc")
 
@@ -343,6 +346,161 @@ func TestGetPhoto_Success(t *testing.T) {
 	data, err := io.ReadAll(rc)
 	require.NoError(t, err)
 	assert.Equal(t, "bytes", string(data))
+}
+
+func TestCreatePhotos_HappyPath(t *testing.T) {
+	repo := &repoMock.SnapRepository{}
+	store := &storageMock.StorageProvider{}
+
+	store.On("Put", mock.Anything, mock.Anything, mock.Anything, "image/png").Return(nil).Twice()
+	repo.On("CreatePhotos", mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			photos := args.Get(1).([]domain.Photo)
+			for i := range photos {
+				photos[i].ID = int64(i + 1)
+			}
+		}).
+		Return(nil).Once()
+
+	photos, err := newService(repo, store).CreatePhotos(context.Background(), []string{pngB64("a"), pngB64("b")})
+
+	require.NoError(t, err)
+	require.Len(t, photos, 2)
+	for i, p := range photos {
+		assert.Equal(t, int64(i+1), p.ID)
+		assert.Nil(t, p.SnapID, "standalone uploads have no snap")
+		assert.Equal(t, "/photos/"+p.Token, p.URL)
+	}
+	repo.AssertExpectations(t)
+	store.AssertExpectations(t)
+	store.AssertNotCalled(t, "Delete")
+}
+
+func TestCreatePhotos_NoPhotos(t *testing.T) {
+	repo := &repoMock.SnapRepository{}
+	store := &storageMock.StorageProvider{}
+
+	_, err := newService(repo, store).CreatePhotos(context.Background(), nil)
+
+	assertValidationError(t, err, "at least one photo is required")
+	repo.AssertNotCalled(t, "CreatePhotos")
+}
+
+func TestCreatePhotos_DBFailureCleansUpFiles(t *testing.T) {
+	repo := &repoMock.SnapRepository{}
+	store := &storageMock.StorageProvider{}
+
+	store.On("Put", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
+	repo.On("CreatePhotos", mock.Anything, mock.Anything).Return(assert.AnError).Once()
+	store.On("Delete", mock.Anything, mock.Anything).Return(nil).Twice()
+
+	_, err := newService(repo, store).CreatePhotos(context.Background(), []string{pngB64("a"), pngB64("b")})
+
+	require.Error(t, err)
+	repo.AssertExpectations(t)
+	store.AssertExpectations(t)
+}
+
+func TestDeletePhoto_Standalone(t *testing.T) {
+	repo := &repoMock.SnapRepository{}
+	store := &storageMock.StorageProvider{}
+
+	repo.On("GetPhotoByToken", mock.Anything, "tok").
+		Return(&domain.Photo{ID: 7, Token: "tok", StoredKey: "photos/tok.png"}, nil)
+	repo.On("DeletePhoto", mock.Anything, int64(7)).Return(nil).Once()
+	store.On("Delete", mock.Anything, "photos/tok.png").Return(nil).Once()
+
+	err := newService(repo, store).DeletePhoto(context.Background(), "tok")
+
+	require.NoError(t, err)
+	repo.AssertNotCalled(t, "CountPhotosForSnap")
+	repo.AssertNotCalled(t, "DeleteSnap")
+	repo.AssertExpectations(t)
+	store.AssertExpectations(t)
+}
+
+func TestDeletePhoto_LastPhotoDeletesSnap(t *testing.T) {
+	repo := &repoMock.SnapRepository{}
+	store := &storageMock.StorageProvider{}
+
+	snapID := int64(5)
+	repo.On("GetPhotoByToken", mock.Anything, "tok").
+		Return(&domain.Photo{ID: 7, Token: "tok", StoredKey: "photos/tok.png", SnapID: &snapID}, nil)
+	repo.On("DeletePhoto", mock.Anything, int64(7)).Return(nil).Once()
+	store.On("Delete", mock.Anything, "photos/tok.png").Return(nil).Once()
+	repo.On("CountPhotosForSnap", mock.Anything, int64(5)).Return(0, nil).Once()
+	repo.On("DeleteSnap", mock.Anything, int64(5)).Return(nil).Once()
+
+	err := newService(repo, store).DeletePhoto(context.Background(), "tok")
+
+	require.NoError(t, err)
+	repo.AssertExpectations(t)
+	store.AssertExpectations(t)
+}
+
+func TestDeletePhoto_SnapWithRemainingPhotosKept(t *testing.T) {
+	repo := &repoMock.SnapRepository{}
+	store := &storageMock.StorageProvider{}
+
+	snapID := int64(5)
+	repo.On("GetPhotoByToken", mock.Anything, "tok").
+		Return(&domain.Photo{ID: 7, Token: "tok", StoredKey: "photos/tok.png", SnapID: &snapID}, nil)
+	repo.On("DeletePhoto", mock.Anything, int64(7)).Return(nil).Once()
+	store.On("Delete", mock.Anything, "photos/tok.png").Return(nil).Once()
+	repo.On("CountPhotosForSnap", mock.Anything, int64(5)).Return(2, nil).Once()
+
+	err := newService(repo, store).DeletePhoto(context.Background(), "tok")
+
+	require.NoError(t, err)
+	repo.AssertNotCalled(t, "DeleteSnap")
+	repo.AssertExpectations(t)
+	store.AssertExpectations(t)
+}
+
+func TestDeletePhoto_NotFoundPassesThrough(t *testing.T) {
+	repo := &repoMock.SnapRepository{}
+	store := &storageMock.StorageProvider{}
+
+	repo.On("GetPhotoByToken", mock.Anything, "nope").Return(nil, domain.ErrNotFound)
+
+	err := newService(repo, store).DeletePhoto(context.Background(), "nope")
+
+	assert.ErrorIs(t, err, domain.ErrNotFound)
+	repo.AssertNotCalled(t, "DeletePhoto")
+	store.AssertNotCalled(t, "Delete")
+}
+
+func TestGetPhoto_IncrementsViewCount(t *testing.T) {
+	repo := &repoMock.SnapRepository{}
+	store := &storageMock.StorageProvider{}
+
+	repo.On("GetPhotoByToken", mock.Anything, "abc").
+		Return(&domain.Photo{Token: "abc", StoredKey: "photos/abc.jpg"}, nil)
+	store.On("Get", mock.Anything, "photos/abc.jpg").
+		Return(io.NopCloser(strings.NewReader("x")), "image/jpeg", nil)
+	repo.On("IncrementPhotoViews", mock.Anything, "abc").Return(nil).Once()
+
+	rc, _, err := newService(repo, store).GetPhoto(context.Background(), "abc")
+	require.NoError(t, err)
+	_ = rc.Close()
+
+	repo.AssertExpectations(t)
+}
+
+func TestListAllPhotos_PopulatesURLs(t *testing.T) {
+	repo := &repoMock.SnapRepository{}
+	store := &storageMock.StorageProvider{}
+
+	repo.On("ListAllPhotos", mock.Anything).Return([]domain.Photo{
+		{ID: 2, Token: "t2"}, {ID: 1, Token: "t1"},
+	}, nil)
+
+	photos, err := newService(repo, store).ListAllPhotos(context.Background())
+
+	require.NoError(t, err)
+	require.Len(t, photos, 2)
+	assert.Equal(t, "/photos/t2", photos[0].URL)
+	assert.Equal(t, "/photos/t1", photos[1].URL)
 }
 
 func TestListSnaps_PopulatesURLs(t *testing.T) {

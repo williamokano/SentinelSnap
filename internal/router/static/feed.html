@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SentinelSnap · Feed</title>
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body class="feed-page">
+  <header>
+    <span class="brand">SentinelSnap</span>
+    <nav class="page-nav">
+      <a href="/">Map</a>
+      <a href="/feed" class="active">Feed</a>
+    </nav>
+  </header>
+
+  <main id="feed">
+    <p id="feed-empty" class="feed-empty" hidden>No photos yet.</p>
+  </main>
+
+  <!-- Zoomable photo viewer: pan with drag, zoom with wheel / double-click /
+       two-finger pinch. -->
+  <div id="viewer">
+    <span id="viewer-close">&times;</span>
+    <div id="viewer-stage">
+      <img id="viewer-img" src="" alt="" draggable="false" />
+    </div>
+  </div>
+
+  <div id="toast-container"></div>
+
+  <script src="/common.js"></script>
+  <script src="/feed.js"></script>
+</body>
+</html>

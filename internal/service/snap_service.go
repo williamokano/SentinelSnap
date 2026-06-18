@@ -175,6 +175,100 @@ func (s *SnapService) storePhoto(ctx context.Context, idx int, data string) (*do
 	}, nil
 }
 
+// CreatePhotos stores standalone photos (no GPS, no snap). It mirrors
+// CreateSnap's storage handling: files are written first and removed
+// best-effort if the database write fails, so storage never accumulates
+// orphans. Each created photo is broadcast so live feeds pick it up.
+func (s *SnapService) CreatePhotos(ctx context.Context, photoData []string) ([]domain.Photo, error) {
+	if len(photoData) == 0 {
+		return nil, &ValidationError{Msg: "at least one photo is required"}
+	}
+	if len(photoData) > maxPhotosPerSnap {
+		return nil, &ValidationError{Msg: fmt.Sprintf("at most %d photos per upload, got %d", maxPhotosPerSnap, len(photoData))}
+	}
+
+	var storedKeys []string
+	cleanup := func() {
+		bg := context.WithoutCancel(ctx)
+		for _, key := range storedKeys {
+			if err := s.storage.Delete(bg, key); err != nil {
+				slog.ErrorContext(bg, "cleanup: failed to delete stored photo", "key", key, "error", err)
+			}
+		}
+	}
+
+	photos := make([]domain.Photo, 0, len(photoData))
+	for i, data := range photoData {
+		photo, err := s.storePhoto(ctx, i, data)
+		if err != nil {
+			cleanup()
+			return nil, err
+		}
+		storedKeys = append(storedKeys, photo.StoredKey)
+		photos = append(photos, *photo)
+	}
+
+	if err := s.repo.CreatePhotos(ctx, photos); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("create photos: %w", err)
+	}
+
+	for i := range photos {
+		photos[i].URL = photoURL(photos[i].Token)
+		s.hub.Broadcast(ctx, hub.EventPhotoCreated, photos[i])
+	}
+	return photos, nil
+}
+
+// ListAllPhotos returns every photo — snap-linked and standalone — newest
+// first, with photo URLs populated.
+func (s *SnapService) ListAllPhotos(ctx context.Context) ([]domain.Photo, error) {
+	photos, err := s.repo.ListAllPhotos(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range photos {
+		photos[i].URL = photoURL(photos[i].Token)
+	}
+	return photos, nil
+}
+
+// DeletePhoto removes a single photo (addressed by its capability token):
+// its DB row first (source of truth), then its stored file best-effort. When
+// the deleted photo was the last one belonging to a snap, that now-empty snap
+// is deleted too so it disappears from the map. A photo_deleted event always
+// fires; a snap_deleted event fires only when the parent snap is removed.
+func (s *SnapService) DeletePhoto(ctx context.Context, token string) error {
+	photo, err := s.repo.GetPhotoByToken(ctx, token)
+	if err != nil {
+		return err
+	}
+
+	if err := s.repo.DeletePhoto(ctx, photo.ID); err != nil {
+		return fmt.Errorf("delete photo %d: %w", photo.ID, err)
+	}
+
+	if err := s.storage.Delete(ctx, photo.StoredKey); err != nil {
+		slog.WarnContext(ctx, "failed to delete stored file", "key", photo.StoredKey, "photo_id", photo.ID, "error", err)
+	}
+
+	if photo.SnapID != nil {
+		remaining, err := s.repo.CountPhotosForSnap(ctx, *photo.SnapID)
+		if err != nil {
+			slog.WarnContext(ctx, "failed to count remaining photos for snap", "snap_id", *photo.SnapID, "error", err)
+		} else if remaining == 0 {
+			if err := s.repo.DeleteSnap(ctx, *photo.SnapID); err != nil {
+				slog.WarnContext(ctx, "failed to delete now-empty snap", "snap_id", *photo.SnapID, "error", err)
+			} else {
+				s.hub.Broadcast(ctx, hub.EventSnapDeleted, map[string]int64{"id": *photo.SnapID})
+			}
+		}
+	}
+
+	s.hub.Broadcast(ctx, hub.EventPhotoDeleted, map[string]int64{"id": photo.ID})
+	return nil
+}
+
 // RenameSnap validates and persists a new name, then broadcasts the change.
 func (s *SnapService) RenameSnap(ctx context.Context, id int64, name string) error {
 	if len(name) > maxSnapNameLen {
@@ -235,6 +329,11 @@ func (s *SnapService) GetPhoto(ctx context.Context, token string) (io.ReadCloser
 	rc, ct, err := s.storage.Get(ctx, photo.StoredKey)
 	if err != nil {
 		return nil, "", fmt.Errorf("read photo %q: %w", token, err)
+	}
+	// Opening a photo counts as a view. Best-effort: a failed bump must never
+	// keep the image from being served.
+	if err := s.repo.IncrementPhotoViews(ctx, token); err != nil {
+		slog.WarnContext(ctx, "failed to increment photo view count", "token", token, "error", err)
 	}
 	return rc, ct, nil
 }

@@ -87,7 +87,33 @@ event: snap_deleted
 data: { "id": 7 }
 ```
 
-Frontend action: removes the marker from the map and shows a red toast.
+Frontend action: removes the marker from the map and shows a red toast. The feed page also drops any cards belonging to that snap.
+
+---
+
+### `photo` — standalone photo uploaded
+
+Fired after `POST /photos` succeeds (one event per photo). Carries the photo, not a snap — these GPS-less uploads appear only in the feed, never on the map.
+
+```
+event: photo
+data: { "id": 12, "url": "/photos/<token>", "created_at": "2024-01-01T12:00:00Z" }
+```
+
+Frontend action (feed page): prepends a new card.
+
+---
+
+### `photo_deleted` — photo deleted
+
+Fired after `DELETE /photos/{token}` succeeds. If the deleted photo was a snap's last one, a `snap_deleted` event fires as well.
+
+```
+event: photo_deleted
+data: { "id": 12 }
+```
+
+Frontend action (feed page): removes the card and shows a red toast.
 
 ---
 
@@ -125,9 +151,11 @@ Event type strings are defined as Go constants in `internal/hub/hub.go` to avoid
 
 ```go
 const (
-    EventSnapCreated = "snap"
-    EventSnapUpdated = "snap_updated"
-    EventSnapDeleted = "snap_deleted"
+    EventSnapCreated  = "snap"
+    EventSnapUpdated  = "snap_updated"
+    EventSnapDeleted  = "snap_deleted"
+    EventPhotoCreated = "photo"
+    EventPhotoDeleted = "photo_deleted"
 )
 ```
 

@@ -12,9 +12,11 @@ import (
 )
 
 const (
-	EventSnapCreated = "snap"
-	EventSnapUpdated = "snap_updated"
-	EventSnapDeleted = "snap_deleted"
+	EventSnapCreated  = "snap"
+	EventSnapUpdated  = "snap_updated"
+	EventSnapDeleted  = "snap_deleted"
+	EventPhotoCreated = "photo"
+	EventPhotoDeleted = "photo_deleted"
 )
 
 // heartbeatInterval controls how often ServeSSE writes a keepalive comment.

@@ -15,7 +15,7 @@ Phone (iOS Shortcut / Android Tasker)
                                                    └─ Pin appears on map instantly
 ```
 
-Open the map on any browser and see every snap pinned at its exact location — live, no refresh needed. Multiple browser tabs stay in sync via [Server-Sent Events](docs/realtime.md).
+Open the map on any browser and see every snap pinned at its exact location — live, no refresh needed. The companion **feed** page (`/feed`) shows every photo — snaps and GPS-less "simple uploads" alike — newest first, with a tap-to-zoom viewer and a per-photo delete menu. Multiple browser tabs stay in sync via [Server-Sent Events](docs/realtime.md).
 
 See [docs/](docs/) for detailed flow documentation.
 
@@ -23,7 +23,7 @@ See [docs/](docs/) for detailed flow documentation.
 
 ## Authentication
 
-Set `API_TOKEN` to require a static bearer token on all snap endpoints (`POST/GET /snaps`, `PATCH/DELETE /snaps/{id}`) and the SSE stream (`GET /events`):
+Set `API_TOKEN` to require a static bearer token on all snap and photo endpoints (`POST/GET /snaps`, `PATCH/DELETE /snaps/{id}`, `POST/GET /photos`, `DELETE /photos/{token}`) and the SSE stream (`GET /events`):
 
 ```bash
 API_TOKEN=$(openssl rand -hex 32)
@@ -31,7 +31,7 @@ API_TOKEN=$(openssl rand -hex 32)
 
 Clients authenticate with an `Authorization: Bearer <token>` header. For SSE, where `EventSource` cannot set headers, pass the token as a query parameter instead: `GET /events?token=<token>`. Unauthenticated requests get `401 {"error":"unauthorized"}`.
 
-When `API_TOKEN` is empty (the default) authentication is disabled and the server is fully open — a warning is logged at startup. `/healthz`, `/metrics`, `GET /photos/{token}` (unguessable capability URLs), and the static map page are never token-protected; the map UI prompts for the token in the browser the first time the server rejects a request and remembers it in `localStorage`.
+When `API_TOKEN` is empty (the default) authentication is disabled and the server is fully open — a warning is logged at startup. `/healthz`, `/metrics`, `GET /photos/{token}` (unguessable capability URLs), and the static map and feed pages are never token-protected; the UI prompts for the token in the browser the first time the server rejects a request and remembers it in `localStorage`.
 
 ---
 
@@ -282,9 +282,35 @@ Also broadcasts a `snap_deleted` SSE event to all connected browsers.
 
 ---
 
+### `POST /photos`
+
+Upload one or more photos **without GPS** ("simple uploads"). Unlike a snap, these photos are not tied to a location and never appear on the map — only in the feed. The body, content-type detection, photo limit (10), and 50 MiB cap match `POST /snaps`, minus the coordinates:
+
+```json
+{ "photos": [ "<base64-encoded image>" ] }
+```
+
+**Response `201`:** an array of the created photos (each with `id`, `url`, `created_at`; no `snap_id`). Also broadcasts a `photo` SSE event to all connected browsers.
+
+---
+
+### `GET /photos`
+
+List **all** photos — both snap-linked and standalone uploads — newest first. Used by the feed page. Each entry carries `id`, `url`, `created_at`, and `snap_id` (omitted for standalone uploads).
+
+---
+
+### `DELETE /photos/{token}`
+
+Delete a single photo, addressed by the same capability token used to view it. The photo's file and row are removed; if it was the **last** photo of a snap, that now-empty snap is deleted too (and a `snap_deleted` event fires so it disappears from the map). Always broadcasts a `photo_deleted` SSE event.
+
+**Response `204` No Content.**
+
+---
+
 ### `GET /photos/{token}`
 
-Stream a photo by its random token. Tokens are generated at upload time and stored in the database — they are not derivable from any other ID or path, preventing enumeration.
+Stream a photo by its random token. Tokens are generated at upload time and stored in the database — they are not derivable from any other ID or path, preventing enumeration. Each successful fetch increments the photo's view counter (stored on the row; not currently surfaced in any response).
 
 ---
 
