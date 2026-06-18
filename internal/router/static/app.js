@@ -95,56 +95,11 @@ document.addEventListener('click', e => {
   }
 });
 
-function showToast(msg, variant = '') {
-  const container = document.getElementById('toast-container');
-  const el = document.createElement('div');
-  el.className = 'toast' + (variant ? ' toast-' + variant : '');
-  el.textContent = msg;
-  container.appendChild(el);
-  requestAnimationFrame(() => { requestAnimationFrame(() => el.classList.add('show')); });
-  setTimeout(() => {
-    el.classList.remove('show');
-    el.addEventListener('transitionend', () => el.remove(), { once: true });
-  }, 3500);
-}
-
-const API_TOKEN_KEY = 'apiToken';
-
-function getApiToken() {
-  return localStorage.getItem(API_TOKEN_KEY) || '';
-}
-
-// Wrapper around fetch that attaches the stored bearer token and, on a 401,
-// prompts for a token, stores it, and retries once. When the server runs
-// without API_TOKEN configured this is a plain fetch.
-async function apiFetch(url, options = {}) {
-  const doFetch = () => {
-    const headers = Object.assign({}, options.headers);
-    const token = getApiToken();
-    if (token) headers['Authorization'] = 'Bearer ' + token;
-    return fetch(url, Object.assign({}, options, { headers }));
-  };
-  let res = await doFetch();
-  if (res.status === 401) {
-    const entered = prompt('This server requires an API token:');
-    if (entered === null) return res;
-    localStorage.setItem(API_TOKEN_KEY, entered.trim());
-    res = await doFetch();
-  }
-  return res;
-}
+// apiFetch, getApiToken, showToast, escapeHtml, formatDate, and eventsUrl
+// live in common.js, which loads before this file.
 
 function snapLabel(snap) {
   return snap.name || ('Snap #' + snap.id);
-}
-
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }
 
 function buildPopup(snap) {
@@ -202,10 +157,6 @@ async function deleteSnap(id) {
   if (!confirm(`Delete "${snapLabel(entries.get(id)?.snap)}"? This cannot be undone.`)) return;
   const res = await apiFetch(`/snaps/${id}`, { method: 'DELETE' });
   if (!res.ok) alert('Failed to delete snap.');
-}
-
-function formatDate(iso) {
-  return new Date(iso).toLocaleString();
 }
 
 function addSnapMarker(snap) {
@@ -270,10 +221,9 @@ async function loadSnaps() {
 
 function connectEvents() {
   // EventSource cannot set headers, so the token travels as a query
-  // parameter. No stored token means the initial GET /snaps succeeded
-  // without one (server is open) — connect bare.
-  const token = getApiToken();
-  const es = new EventSource(token ? '/events?token=' + encodeURIComponent(token) : '/events');
+  // parameter (see eventsUrl in common.js). No stored token means the initial
+  // GET /snaps succeeded without one (server is open) — connect bare.
+  const es = new EventSource(eventsUrl());
   let wasDisconnected = false;
 
   es.addEventListener('open', () => {

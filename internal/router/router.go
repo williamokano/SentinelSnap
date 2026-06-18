@@ -62,6 +62,14 @@ func New(cfg *config.Config, h *handler.SnapHandler, ev *hub.Hub, hh *handler.He
 			r.Get("/snaps", h.ListSnaps)
 			r.Patch("/snaps/{id}", h.UpdateSnap)
 			r.Delete("/snaps/{id}", h.DeleteSnap)
+
+			// Photos: simple GPS-less uploads, the feed listing of all
+			// photos, and per-photo delete. Delete shares the /photos/{token}
+			// path that serves the image — same capability URL, just DELETE.
+			r.Post("/photos", h.CreatePhotos)
+			r.Get("/photos", h.ListPhotos)
+			r.Delete("/photos/{token}", h.DeletePhoto)
+
 			r.Get("/events", ev.ServeSSE)
 		})
 
@@ -74,6 +82,11 @@ func New(cfg *config.Config, h *handler.SnapHandler, ev *hub.Hub, hh *handler.He
 		// (/healthz and /metrics live outside this group: orchestrator health
 		// checks and the metrics scraper must keep working without credentials.)
 		r.Get("/photos/{token}", h.ServePhoto)
+		// Clean URL for the photo feed page; the file itself also remains
+		// reachable at /feed.html via the static file server below.
+		r.Get("/feed", func(w http.ResponseWriter, r *http.Request) {
+			http.ServeFileFS(w, r, staticFS, "feed.html")
+		})
 		r.Handle("/*", http.FileServer(http.FS(staticFS)))
 	})
 

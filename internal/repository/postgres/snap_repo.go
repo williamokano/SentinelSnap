@@ -31,18 +31,18 @@ func (r *snapRepository) CreateSnapWithPhotos(ctx context.Context, snap *domain.
 	defer func() { _ = tx.Rollback() }()
 
 	if err := tx.QueryRowContext(ctx,
-		`INSERT INTO snaps (latitude, longitude) VALUES ($1, $2) RETURNING id`,
+		`INSERT INTO snaps (latitude, longitude) VALUES ($1, $2) RETURNING id, created_at`,
 		snap.Latitude, snap.Longitude,
-	).Scan(&snap.ID); err != nil {
+	).Scan(&snap.ID, &snap.CreatedAt); err != nil {
 		return fmt.Errorf("create snap with photos: insert snap: %w", err)
 	}
 
 	for i := range photos {
-		photos[i].SnapID = snap.ID
+		photos[i].SnapID = &snap.ID
 		if err := tx.QueryRowContext(ctx,
-			`INSERT INTO photos (snap_id, stored_key, token) VALUES ($1, $2, $3) RETURNING id`,
+			`INSERT INTO photos (snap_id, stored_key, token) VALUES ($1, $2, $3) RETURNING id, created_at`,
 			snap.ID, photos[i].StoredKey, photos[i].Token,
-		).Scan(&photos[i].ID); err != nil {
+		).Scan(&photos[i].ID, &photos[i].CreatedAt); err != nil {
 			return fmt.Errorf("create snap with photos: insert photo %d: %w", i, err)
 		}
 	}
@@ -86,7 +86,7 @@ func (r *snapRepository) ListSnaps(ctx context.Context) ([]domain.Snap, error) {
 		ids[i] = s.ID
 	}
 
-	query, args, err := sqlx.In(`SELECT id, snap_id, stored_key, token, created_at FROM photos WHERE snap_id IN (?) ORDER BY snap_id, id`, ids)
+	query, args, err := sqlx.In(`SELECT id, snap_id, stored_key, token, view_count, created_at FROM photos WHERE snap_id IN (?) ORDER BY snap_id, id`, ids)
 	if err != nil {
 		return nil, fmt.Errorf("build photos query: %w", err)
 	}
@@ -99,7 +99,11 @@ func (r *snapRepository) ListSnaps(ctx context.Context) ([]domain.Snap, error) {
 
 	photosBySnap := make(map[int64][]domain.Photo, len(snaps))
 	for _, p := range photos {
-		photosBySnap[p.SnapID] = append(photosBySnap[p.SnapID], p)
+		// snap_id is guaranteed non-NULL here: the query filters on snap_id IN (...).
+		if p.SnapID == nil {
+			continue
+		}
+		photosBySnap[*p.SnapID] = append(photosBySnap[*p.SnapID], p)
 	}
 	for i := range snaps {
 		snaps[i].Photos = photosBySnap[snaps[i].ID]
@@ -133,7 +137,7 @@ func (r *snapRepository) GetSnapByID(ctx context.Context, id int64) (*domain.Sna
 func (r *snapRepository) GetPhotoByToken(ctx context.Context, token string) (*domain.Photo, error) {
 	var photo domain.Photo
 	err := r.db.GetContext(ctx, &photo,
-		`SELECT id, snap_id, stored_key, token, created_at FROM photos WHERE token = $1`, token,
+		`SELECT id, snap_id, stored_key, token, view_count, created_at FROM photos WHERE token = $1`, token,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, domain.ErrNotFound
@@ -147,9 +151,78 @@ func (r *snapRepository) GetPhotoByToken(ctx context.Context, token string) (*do
 func (r *snapRepository) ListPhotosForSnap(ctx context.Context, snapID int64) ([]domain.Photo, error) {
 	var photos []domain.Photo
 	if err := r.db.SelectContext(ctx, &photos,
-		`SELECT id, snap_id, stored_key, token, created_at FROM photos WHERE snap_id = $1 ORDER BY id`, snapID,
+		`SELECT id, snap_id, stored_key, token, view_count, created_at FROM photos WHERE snap_id = $1 ORDER BY id`, snapID,
 	); err != nil {
 		return nil, fmt.Errorf("list photos for snap %d: %w", snapID, err)
 	}
 	return photos, nil
+}
+
+// CreatePhotos inserts standalone photos (snap_id NULL) in one transaction,
+// writing the generated IDs back onto the passed structs.
+func (r *snapRepository) CreatePhotos(ctx context.Context, photos []domain.Photo) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("create photos: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for i := range photos {
+		if err := tx.QueryRowContext(ctx,
+			`INSERT INTO photos (snap_id, stored_key, token) VALUES (NULL, $1, $2) RETURNING id, created_at`,
+			photos[i].StoredKey, photos[i].Token,
+		).Scan(&photos[i].ID, &photos[i].CreatedAt); err != nil {
+			return fmt.Errorf("create photos: insert photo %d: %w", i, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("create photos: commit: %w", err)
+	}
+	return nil
+}
+
+func (r *snapRepository) ListAllPhotos(ctx context.Context) ([]domain.Photo, error) {
+	var photos []domain.Photo
+	if err := r.db.SelectContext(ctx, &photos,
+		`SELECT id, snap_id, stored_key, token, view_count, created_at FROM photos ORDER BY created_at DESC, id DESC`,
+	); err != nil {
+		return nil, fmt.Errorf("list all photos: %w", err)
+	}
+	if photos == nil {
+		photos = []domain.Photo{}
+	}
+	return photos, nil
+}
+
+func (r *snapRepository) DeletePhoto(ctx context.Context, id int64) error {
+	res, err := r.db.ExecContext(ctx, `DELETE FROM photos WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("delete photo %d: %w", id, err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+func (r *snapRepository) CountPhotosForSnap(ctx context.Context, snapID int64) (int, error) {
+	var n int
+	if err := r.db.GetContext(ctx, &n,
+		`SELECT COUNT(*) FROM photos WHERE snap_id = $1`, snapID,
+	); err != nil {
+		return 0, fmt.Errorf("count photos for snap %d: %w", snapID, err)
+	}
+	return n, nil
+}
+
+func (r *snapRepository) IncrementPhotoViews(ctx context.Context, token string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE photos SET view_count = view_count + 1 WHERE token = $1`, token,
+	)
+	if err != nil {
+		return fmt.Errorf("increment photo views: %w", err)
+	}
+	return nil
 }

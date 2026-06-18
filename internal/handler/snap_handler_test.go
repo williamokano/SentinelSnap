@@ -57,7 +57,8 @@ func expectCreateSnapWithPhotos(repo *repoMock.SnapRepository, snapID int64) *mo
 			photos := args.Get(2).([]domain.Photo)
 			for i := range photos {
 				photos[i].ID = int64(i + 1)
-				photos[i].SnapID = snapID
+				sid := snapID
+				photos[i].SnapID = &sid
 			}
 		}).
 		Return(nil)
@@ -494,7 +495,7 @@ func TestListSnaps_WithData(t *testing.T) {
 	snaps := []domain.Snap{
 		{
 			ID: 1, Latitude: 37.77, Longitude: -122.41,
-			Photos: []domain.Photo{{ID: 10, SnapID: 1, Token: "abc123", StoredKey: "snaps/1/p.jpg"}},
+			Photos: []domain.Photo{{ID: 10, Token: "abc123", StoredKey: "snaps/1/p.jpg"}},
 		},
 	}
 	repo.On("ListSnaps", mock.Anything).Return(snaps, nil)
@@ -512,6 +513,118 @@ func TestListSnaps_WithData(t *testing.T) {
 	photos := resp[0]["photos"].([]any)
 	assert.Len(t, photos, 1)
 	assert.Equal(t, "/photos/abc123", photos[0].(map[string]any)["url"])
+}
+
+// ---- CreatePhotos ----
+
+func TestCreatePhotos_Success(t *testing.T) {
+	repo := &repoMock.SnapRepository{}
+	store := &storageMock.StorageProvider{}
+
+	store.On("Put", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
+	repo.On("CreatePhotos", mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			photos := args.Get(1).([]domain.Photo)
+			for i := range photos {
+				photos[i].ID = int64(i + 1)
+			}
+		}).
+		Return(nil).Once()
+
+	body, _ := json.Marshal(map[string]any{"photos": []string{pngB64("a"), pngB64("b")}})
+	req := httptest.NewRequest(http.MethodPost, "/photos", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	newHandler(repo, store).CreatePhotos(w, req)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	var resp []map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp, 2)
+	for _, p := range resp {
+		url, ok := p["url"].(string)
+		assert.True(t, ok)
+		assert.Contains(t, url, "/photos/")
+		_, hasSnapID := p["snap_id"]
+		assert.False(t, hasSnapID, "standalone photos omit snap_id")
+	}
+	repo.AssertExpectations(t)
+	store.AssertExpectations(t)
+}
+
+func TestCreatePhotos_NoPhotos(t *testing.T) {
+	repo := &repoMock.SnapRepository{}
+	store := &storageMock.StorageProvider{}
+
+	body, _ := json.Marshal(map[string]any{"photos": []string{}})
+	req := httptest.NewRequest(http.MethodPost, "/photos", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	newHandler(repo, store).CreatePhotos(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	repo.AssertNotCalled(t, "CreatePhotos")
+}
+
+// ---- ListPhotos ----
+
+func TestListPhotos_WithData(t *testing.T) {
+	repo := &repoMock.SnapRepository{}
+	store := &storageMock.StorageProvider{}
+
+	repo.On("ListAllPhotos", mock.Anything).Return([]domain.Photo{
+		{ID: 2, Token: "newer"}, {ID: 1, Token: "older"},
+	}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/photos", nil)
+	w := httptest.NewRecorder()
+
+	newHandler(repo, store).ListPhotos(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var resp []map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp, 2)
+	assert.Equal(t, "/photos/newer", resp[0]["url"])
+	assert.Equal(t, "/photos/older", resp[1]["url"])
+}
+
+// ---- DeletePhoto ----
+
+func TestDeletePhoto_Success(t *testing.T) {
+	repo := &repoMock.SnapRepository{}
+	store := &storageMock.StorageProvider{}
+
+	repo.On("GetPhotoByToken", mock.Anything, "tok").
+		Return(&domain.Photo{ID: 3, Token: "tok", StoredKey: "photos/tok.png"}, nil)
+	repo.On("DeletePhoto", mock.Anything, int64(3)).Return(nil).Once()
+	store.On("Delete", mock.Anything, "photos/tok.png").Return(nil).Once()
+
+	req := withParam(httptest.NewRequest(http.MethodDelete, "/photos/tok", nil), "token", "tok")
+	w := httptest.NewRecorder()
+
+	newHandler(repo, store).DeletePhoto(w, req)
+
+	assert.Equal(t, http.StatusNoContent, w.Code)
+	repo.AssertExpectations(t)
+	store.AssertExpectations(t)
+}
+
+func TestDeletePhoto_NotFound(t *testing.T) {
+	repo := &repoMock.SnapRepository{}
+	store := &storageMock.StorageProvider{}
+
+	repo.On("GetPhotoByToken", mock.Anything, "nope").Return(nil, domain.ErrNotFound)
+
+	req := withParam(httptest.NewRequest(http.MethodDelete, "/photos/nope", nil), "token", "nope")
+	w := httptest.NewRecorder()
+
+	newHandler(repo, store).DeletePhoto(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	repo.AssertExpectations(t)
 }
 
 func TestListSnaps_RepoError(t *testing.T) {

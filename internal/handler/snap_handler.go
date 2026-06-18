@@ -112,6 +112,46 @@ func (h *SnapHandler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, snap)
 }
 
+type createPhotosRequest struct {
+	Photos []string `json:"photos"`
+}
+
+func (h *SnapHandler) CreatePhotos(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxSnapBodyBytes)
+
+	var req createPhotosRequest
+	if !decodeJSONBody(w, r, &req) {
+		return
+	}
+
+	photos, err := h.svc.CreatePhotos(r.Context(), req.Photos)
+	if err != nil {
+		writeServiceError(w, err, "photo not found", "could not create photos")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, photos)
+}
+
+func (h *SnapHandler) ListPhotos(w http.ResponseWriter, r *http.Request) {
+	photos, err := h.svc.ListAllPhotos(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not list photos")
+		return
+	}
+	writeJSON(w, http.StatusOK, photos)
+}
+
+func (h *SnapHandler) DeletePhoto(w http.ResponseWriter, r *http.Request) {
+	token := chi.URLParam(r, "token")
+	if err := h.svc.DeletePhoto(r.Context(), token); err != nil {
+		writeServiceError(w, err, "photo not found", "could not delete photo")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *SnapHandler) ServePhoto(w http.ResponseWriter, r *http.Request) {
 	token := chi.URLParam(r, "token")
 	rc, ct, err := h.svc.GetPhoto(r.Context(), token)

@@ -11,7 +11,11 @@
 </head>
 <body>
   <header>
-    <span>SentinelSnap</span>
+    <span class="brand">SentinelSnap</span>
+    <nav class="page-nav">
+      <a href="/" class="active">Map</a>
+      <a href="/feed">Feed</a>
+    </nav>
     <div class="theme-toggle">
       <button id="theme-default" class="active">Default</button>
       <button id="theme-dark">Dark</button>
@@ -27,6 +31,7 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <script src="/common.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>
