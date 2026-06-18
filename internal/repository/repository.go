@@ -29,4 +29,10 @@ type SnapRepository interface {
 	// to detect when a snap's last photo has been deleted.
 	CountPhotosForSnap(ctx context.Context, snapID int64) (int, error)
 	IncrementPhotoViews(ctx context.Context, token string) error
+
+	// SetPhotoThumbKey records the storage key of a photo's generated
+	// thumbnail. The thumbnail is generated lazily on the first /thumb
+	// request for a photo and persisted via this call, so subsequent
+	// requests serve the stored file rather than re-decoding the original.
+	SetPhotoThumbKey(ctx context.Context, id int64, thumbKey string) error
 }

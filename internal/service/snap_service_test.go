@@ -1,10 +1,14 @@
 package service_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	"image/png"
 	"io"
 	"strings"
 	"sync"
@@ -517,4 +521,123 @@ func TestListSnaps_PopulatesURLs(t *testing.T) {
 	require.Len(t, snaps, 1)
 	assert.Equal(t, "/photos/t1", snaps[0].Photos[0].URL)
 	assert.Equal(t, "/photos/t2", snaps[0].Photos[1].URL)
+}
+
+// realPNG encodes a w×h opaque PNG that the standard library can decode,
+// used to exercise real thumbnail generation through the service.
+func realPNG(t *testing.T, w, h int) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	var buf bytes.Buffer
+	require.NoError(t, png.Encode(&buf, img))
+	return buf.Bytes()
+}
+
+func TestGetPhotoThumb_ServesStoredWhenPresent(t *testing.T) {
+	repo := &repoMock.SnapRepository{}
+	store := &storageMock.StorageProvider{}
+
+	thumb := "thumbs/tok.jpg"
+	repo.On("GetPhotoByToken", mock.Anything, "tok").
+		Return(&domain.Photo{ID: 7, Token: "tok", StoredKey: "photos/tok.png", ThumbKey: &thumb}, nil)
+	store.On("Get", mock.Anything, thumb).
+		Return(io.NopCloser(strings.NewReader("stored-thumb")), "image/jpeg", nil).Once()
+
+	rc, err := newService(repo, store).GetPhotoThumb(context.Background(), "tok")
+
+	require.NoError(t, err)
+	got, _ := io.ReadAll(rc)
+	require.NoError(t, rc.Close())
+	assert.Equal(t, "stored-thumb", string(got))
+	// A present thumbnail must not be regenerated or re-persisted.
+	store.AssertNotCalled(t, "Put")
+	repo.AssertNotCalled(t, "SetPhotoThumbKey")
+	store.AssertExpectations(t)
+}
+
+func TestGetPhotoThumb_GeneratesAndPersistsOnMiss(t *testing.T) {
+	repo := &repoMock.SnapRepository{}
+	store := &storageMock.StorageProvider{}
+
+	repo.On("GetPhotoByToken", mock.Anything, "tok").
+		Return(&domain.Photo{ID: 7, Token: "tok", StoredKey: "photos/tok.png"}, nil)
+	store.On("Get", mock.Anything, "photos/tok.png").
+		Return(io.NopCloser(bytes.NewReader(realPNG(t, 500, 400))), "image/png", nil).Once()
+
+	var stored []byte
+	store.On("Put", mock.Anything, "thumbs/tok.jpg", mock.Anything, "image/jpeg").
+		Run(func(args mock.Arguments) {
+			stored, _ = io.ReadAll(args.Get(2).(io.Reader))
+		}).Return(nil).Once()
+	repo.On("SetPhotoThumbKey", mock.Anything, int64(7), "thumbs/tok.jpg").Return(nil).Once()
+
+	rc, err := newService(repo, store).GetPhotoThumb(context.Background(), "tok")
+	require.NoError(t, err)
+	served, _ := io.ReadAll(rc)
+	require.NoError(t, rc.Close())
+
+	// The bytes served match the bytes persisted, and decode as a JPEG no
+	// larger than the thumbnail cap.
+	assert.Equal(t, stored, served)
+	img, format, err := image.Decode(bytes.NewReader(served))
+	require.NoError(t, err)
+	assert.Equal(t, "jpeg", format)
+	assert.LessOrEqual(t, img.Bounds().Dx(), 400)
+	assert.LessOrEqual(t, img.Bounds().Dy(), 400)
+
+	repo.AssertExpectations(t)
+	store.AssertExpectations(t)
+}
+
+func TestGetPhotoThumb_RegeneratesWhenStoredUnreadable(t *testing.T) {
+	repo := &repoMock.SnapRepository{}
+	store := &storageMock.StorageProvider{}
+
+	thumb := "thumbs/tok.jpg"
+	repo.On("GetPhotoByToken", mock.Anything, "tok").
+		Return(&domain.Photo{ID: 7, Token: "tok", StoredKey: "photos/tok.png", ThumbKey: &thumb}, nil)
+	// Stored thumbnail is gone — the row points at a missing file.
+	store.On("Get", mock.Anything, thumb).Return(nil, "", errors.New("no such file")).Once()
+	// Fall back to the original and regenerate.
+	store.On("Get", mock.Anything, "photos/tok.png").
+		Return(io.NopCloser(bytes.NewReader(realPNG(t, 200, 200))), "image/png", nil).Once()
+	store.On("Put", mock.Anything, "thumbs/tok.jpg", mock.Anything, "image/jpeg").Return(nil).Once()
+	repo.On("SetPhotoThumbKey", mock.Anything, int64(7), "thumbs/tok.jpg").Return(nil).Once()
+
+	rc, err := newService(repo, store).GetPhotoThumb(context.Background(), "tok")
+	require.NoError(t, err)
+	require.NoError(t, rc.Close())
+
+	repo.AssertExpectations(t)
+	store.AssertExpectations(t)
+}
+
+func TestGetPhotoThumb_NotFoundPassesThrough(t *testing.T) {
+	repo := &repoMock.SnapRepository{}
+	store := &storageMock.StorageProvider{}
+
+	repo.On("GetPhotoByToken", mock.Anything, "nope").Return(nil, domain.ErrNotFound)
+
+	_, err := newService(repo, store).GetPhotoThumb(context.Background(), "nope")
+
+	assert.ErrorIs(t, err, domain.ErrNotFound)
+	store.AssertNotCalled(t, "Get")
+}
+
+func TestDeletePhoto_DeletesThumbnail(t *testing.T) {
+	repo := &repoMock.SnapRepository{}
+	store := &storageMock.StorageProvider{}
+
+	thumb := "thumbs/tok.jpg"
+	repo.On("GetPhotoByToken", mock.Anything, "tok").
+		Return(&domain.Photo{ID: 7, Token: "tok", StoredKey: "photos/tok.png", ThumbKey: &thumb}, nil)
+	repo.On("DeletePhoto", mock.Anything, int64(7)).Return(nil).Once()
+	store.On("Delete", mock.Anything, "photos/tok.png").Return(nil).Once()
+	store.On("Delete", mock.Anything, thumb).Return(nil).Once()
+
+	err := newService(repo, store).DeletePhoto(context.Background(), "tok")
+
+	require.NoError(t, err)
+	repo.AssertExpectations(t)
+	store.AssertExpectations(t)
 }

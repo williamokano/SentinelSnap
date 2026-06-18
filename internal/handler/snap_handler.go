@@ -171,11 +171,12 @@ func (h *SnapHandler) ServePhoto(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ServePhotoThumb serves a JPEG thumbnail (max 400 px on the longest side)
-// for the photo identified by {token}. Thumbnails are not counted as views.
+// ServePhotoThumb serves a small JPEG thumbnail for the photo identified by
+// {token}, generating and caching it on first request. Thumbnails are not
+// counted as views.
 func (h *SnapHandler) ServePhotoThumb(w http.ResponseWriter, r *http.Request) {
 	token := chi.URLParam(r, "token")
-	rc, err := h.svc.GetPhotoThumb(r.Context(), token, 400)
+	rc, err := h.svc.GetPhotoThumb(r.Context(), token)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			http.NotFound(w, r)

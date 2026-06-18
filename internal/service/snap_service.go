@@ -252,6 +252,11 @@ func (s *SnapService) DeletePhoto(ctx context.Context, token string) error {
 	if err := s.storage.Delete(ctx, photo.StoredKey); err != nil {
 		slog.WarnContext(ctx, "failed to delete stored file", "key", photo.StoredKey, "photo_id", photo.ID, "error", err)
 	}
+	if photo.ThumbKey != nil {
+		if err := s.storage.Delete(ctx, *photo.ThumbKey); err != nil {
+			slog.WarnContext(ctx, "failed to delete stored thumbnail", "key", *photo.ThumbKey, "photo_id", photo.ID, "error", err)
+		}
+	}
 
 	if photo.SnapID != nil {
 		remaining, err := s.repo.CountPhotosForSnap(ctx, *photo.SnapID)
@@ -300,6 +305,11 @@ func (s *SnapService) DeleteSnap(ctx context.Context, id int64) error {
 		if err := s.storage.Delete(ctx, p.StoredKey); err != nil {
 			slog.WarnContext(ctx, "failed to delete stored file", "key", p.StoredKey, "snap_id", id, "error", err)
 		}
+		if p.ThumbKey != nil {
+			if err := s.storage.Delete(ctx, *p.ThumbKey); err != nil {
+				slog.WarnContext(ctx, "failed to delete stored thumbnail", "key", *p.ThumbKey, "snap_id", id, "error", err)
+			}
+		}
 	}
 
 	s.hub.Broadcast(ctx, hub.EventSnapDeleted, map[string]int64{"id": id})
@@ -339,32 +349,92 @@ func (s *SnapService) GetPhoto(ctx context.Context, token string) (io.ReadCloser
 	return rc, ct, nil
 }
 
-// GetPhotoThumb generates and returns a JPEG thumbnail for the photo addressed
-// by token. It does not increment the view count — thumbnails are auto-loaded
-// in the feed and should not count as deliberate views. The caller owns closing
-// the returned reader.
-func (s *SnapService) GetPhotoThumb(ctx context.Context, token string, maxSide int) (io.ReadCloser, error) {
+// thumbMaxSide is the longest-edge cap (in pixels) for generated thumbnails.
+const thumbMaxSide = 400
+
+// GetPhotoThumb returns a small JPEG thumbnail for the photo addressed by
+// token. The thumbnail is generated once, on the first request, and persisted
+// to storage (its key recorded on the photo row); every later request streams
+// that stored file instead of re-decoding the multi-megabyte original. This
+// is what keeps the feed sustainable: each photo is decoded at most once,
+// regardless of how many times its thumbnail is viewed.
+//
+// Thumbnails do not increment the view count — they are auto-loaded in the
+// feed and are not deliberate views. The caller owns closing the reader.
+func (s *SnapService) GetPhotoThumb(ctx context.Context, token string) (io.ReadCloser, error) {
 	photo, err := s.repo.GetPhotoByToken(ctx, token)
 	if err != nil {
 		return nil, err
 	}
-	rc, _, err := s.storage.Get(ctx, photo.StoredKey)
-	if err != nil {
-		return nil, fmt.Errorf("read photo %q: %w", token, err)
+
+	// Fast path: a thumbnail already exists — stream it straight from storage.
+	if photo.ThumbKey != nil {
+		rc, _, err := s.storage.Get(ctx, *photo.ThumbKey)
+		if err == nil {
+			return rc, nil
+		}
+		// The row points at a thumbnail that is gone or unreadable. Fall
+		// through and regenerate rather than failing the request.
+		slog.WarnContext(ctx, "stored thumbnail unreadable, regenerating", "key", *photo.ThumbKey, "photo_id", photo.ID, "error", err)
 	}
 
-	// Stream through the thumbnail encoder via a pipe so we never buffer the
-	// full original in memory.
-	pr, pw := io.Pipe()
-	go func() {
-		defer rc.Close()
-		pw.CloseWithError(thumbnail.Encode(rc, pw, maxSide))
-	}()
-	return pr, nil
+	// Slow path (first view / missing thumbnail): build it from the original,
+	// persist it best-effort, and serve the freshly built bytes.
+	data, err := s.buildThumb(ctx, photo.StoredKey)
+	if err != nil {
+		return nil, err
+	}
+	// Persist with a non-cancelable context: if the client disconnects right
+	// after the (expensive) decode, finish caching the result anyway so the
+	// next request doesn't have to redo the work. A failed persist is still
+	// non-fatal — the thumbnail is simply rebuilt next time.
+	if err := s.persistThumb(context.WithoutCancel(ctx), photo.ID, photo.Token, data); err != nil {
+		slog.WarnContext(ctx, "failed to persist thumbnail", "photo_id", photo.ID, "error", err)
+	}
+	return io.NopCloser(bytes.NewReader(data)), nil
+}
+
+// buildThumb reads a stored original and returns its encoded JPEG thumbnail.
+func (s *SnapService) buildThumb(ctx context.Context, storedKey string) ([]byte, error) {
+	rc, _, err := s.storage.Get(ctx, storedKey)
+	if err != nil {
+		return nil, fmt.Errorf("read original %q: %w", storedKey, err)
+	}
+	defer func() { _ = rc.Close() }()
+
+	var buf bytes.Buffer
+	if err := thumbnail.Encode(rc, &buf, thumbMaxSide); err != nil {
+		return nil, fmt.Errorf("encode thumbnail for %q: %w", storedKey, err)
+	}
+	return buf.Bytes(), nil
+}
+
+// persistThumb writes thumbnail bytes to storage under a deterministic key and
+// records that key on the photo row so future requests skip regeneration.
+func (s *SnapService) persistThumb(ctx context.Context, photoID int64, token string, data []byte) error {
+	key := thumbKey(token)
+	if err := s.storage.Put(ctx, key, bytes.NewReader(data), "image/jpeg"); err != nil {
+		return fmt.Errorf("store thumbnail %q: %w", key, err)
+	}
+	if err := s.repo.SetPhotoThumbKey(ctx, photoID, key); err != nil {
+		// The file is written but the row was not updated; remove the orphan
+		// so the next request regenerates cleanly rather than leaking a file.
+		if delErr := s.storage.Delete(ctx, key); delErr != nil {
+			slog.WarnContext(ctx, "failed to clean up orphan thumbnail", "key", key, "error", delErr)
+		}
+		return fmt.Errorf("record thumbnail key: %w", err)
+	}
+	return nil
 }
 
 func photoURL(token string) string {
 	return "/photos/" + token
+}
+
+// thumbKey is the deterministic storage key for a photo's thumbnail, derived
+// from its token. Thumbnails are always JPEG regardless of the original format.
+func thumbKey(token string) string {
+	return "thumbs/" + token + ".jpg"
 }
 
 // isCorruptBase64 reports whether err stems from malformed base64 input.

@@ -86,7 +86,7 @@ func (r *snapRepository) ListSnaps(ctx context.Context) ([]domain.Snap, error) {
 		ids[i] = s.ID
 	}
 
-	query, args, err := sqlx.In(`SELECT id, snap_id, stored_key, token, view_count, created_at FROM photos WHERE snap_id IN (?) ORDER BY snap_id, id`, ids)
+	query, args, err := sqlx.In(`SELECT id, snap_id, stored_key, token, thumb_key, view_count, created_at FROM photos WHERE snap_id IN (?) ORDER BY snap_id, id`, ids)
 	if err != nil {
 		return nil, fmt.Errorf("build photos query: %w", err)
 	}
@@ -137,7 +137,7 @@ func (r *snapRepository) GetSnapByID(ctx context.Context, id int64) (*domain.Sna
 func (r *snapRepository) GetPhotoByToken(ctx context.Context, token string) (*domain.Photo, error) {
 	var photo domain.Photo
 	err := r.db.GetContext(ctx, &photo,
-		`SELECT id, snap_id, stored_key, token, view_count, created_at FROM photos WHERE token = $1`, token,
+		`SELECT id, snap_id, stored_key, token, thumb_key, view_count, created_at FROM photos WHERE token = $1`, token,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, domain.ErrNotFound
@@ -151,7 +151,7 @@ func (r *snapRepository) GetPhotoByToken(ctx context.Context, token string) (*do
 func (r *snapRepository) ListPhotosForSnap(ctx context.Context, snapID int64) ([]domain.Photo, error) {
 	var photos []domain.Photo
 	if err := r.db.SelectContext(ctx, &photos,
-		`SELECT id, snap_id, stored_key, token, view_count, created_at FROM photos WHERE snap_id = $1 ORDER BY id`, snapID,
+		`SELECT id, snap_id, stored_key, token, thumb_key, view_count, created_at FROM photos WHERE snap_id = $1 ORDER BY id`, snapID,
 	); err != nil {
 		return nil, fmt.Errorf("list photos for snap %d: %w", snapID, err)
 	}
@@ -185,7 +185,7 @@ func (r *snapRepository) CreatePhotos(ctx context.Context, photos []domain.Photo
 func (r *snapRepository) ListAllPhotos(ctx context.Context) ([]domain.Photo, error) {
 	var photos []domain.Photo
 	if err := r.db.SelectContext(ctx, &photos,
-		`SELECT id, snap_id, stored_key, token, view_count, created_at FROM photos ORDER BY created_at DESC, id DESC`,
+		`SELECT id, snap_id, stored_key, token, thumb_key, view_count, created_at FROM photos ORDER BY created_at DESC, id DESC`,
 	); err != nil {
 		return nil, fmt.Errorf("list all photos: %w", err)
 	}
@@ -223,6 +223,20 @@ func (r *snapRepository) IncrementPhotoViews(ctx context.Context, token string) 
 	)
 	if err != nil {
 		return fmt.Errorf("increment photo views: %w", err)
+	}
+	return nil
+}
+
+func (r *snapRepository) SetPhotoThumbKey(ctx context.Context, id int64, thumbKey string) error {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE photos SET thumb_key = $2 WHERE id = $1`, id, thumbKey,
+	)
+	if err != nil {
+		return fmt.Errorf("set photo thumb key for %d: %w", id, err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return domain.ErrNotFound
 	}
 	return nil
 }
