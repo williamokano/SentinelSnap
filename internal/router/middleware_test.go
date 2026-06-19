@@ -212,6 +212,23 @@ func TestDebugBodyLogger_Truncation(t *testing.T) {
 	}
 }
 
+func TestNoCacheStatic_SetsHeaderAndCallsNext(t *testing.T) {
+	called := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		// The handler can still write its own body; the header is set first.
+		_, _ = w.Write([]byte("asset"))
+	})
+
+	handler := noCacheStatic(next)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/feed.js", nil))
+
+	assert.True(t, called, "next handler should be called")
+	assert.Equal(t, "no-cache", w.Header().Get("Cache-Control"),
+		"static assets must be served no-cache so a rebuilt JS/CSS is not shadowed by a stale cached copy")
+}
+
 func TestRouteTagger_NilChiContext(t *testing.T) {
 	called := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

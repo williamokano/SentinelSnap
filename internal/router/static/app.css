@@ -63,13 +63,21 @@ body.feed-page { background: #f2f2f5; }
   padding: 8px 12px;
 }
 .feed-date { font-size: 0.8rem; color: #666; }
+.feed-photo {
+  width: 100%;
+  background: #1a1a2e;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  line-height: 0;
+}
 .feed-img {
   display: block;
   width: 100%;
+  height: auto;
   max-height: 480px;
   object-fit: contain;
   cursor: zoom-in;
-  background: #1a1a2e;
 }
 .feed-menu { position: relative; }
 .feed-menu-btn {
