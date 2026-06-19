@@ -54,7 +54,6 @@ body.feed-page { background: #f2f2f5; }
   background: #fff;
   border-radius: 10px;
   box-shadow: 0 1px 6px rgba(0,0,0,0.12);
-  overflow: hidden;
 }
 .feed-card-bar {
   display: flex;
@@ -70,6 +69,12 @@ body.feed-page { background: #f2f2f5; }
   justify-content: center;
   align-items: center;
   line-height: 0;
+  /* Clip the image to the card's rounded bottom corners here, on the photo
+     wrapper, rather than on .feed-card — putting overflow:hidden on the card
+     also clips the ⋯ dropdown menu, which opens downward from the top bar. */
+  overflow: hidden;
+  border-bottom-left-radius: 10px;
+  border-bottom-right-radius: 10px;
 }
 .feed-img {
   display: block;
