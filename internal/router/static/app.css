@@ -54,7 +54,6 @@ body.feed-page { background: #f2f2f5; }
   background: #fff;
   border-radius: 10px;
   box-shadow: 0 1px 6px rgba(0,0,0,0.12);
-  overflow: hidden;
 }
 .feed-card-bar {
   display: flex;
