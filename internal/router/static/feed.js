@@ -96,9 +96,10 @@ document.addEventListener('click', e => {
   const del = e.target.closest('.feed-delete');
   if (del) {
     const card = del.closest('.feed-card');
-    const img = card.querySelector('.feed-img');
     closeAllMenus();
-    deletePhoto(photoToken({ url: img.getAttribute('src') }));
+    // Use the full photo URL (/photos/{token}), not the <img> src, which points
+    // at the thumbnail (/photos/{token}/thumb) and would yield "thumb" as the token.
+    deletePhoto(photoToken({ url: card.dataset.fullUrl }));
     return;
   }
 
