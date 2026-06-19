@@ -100,6 +100,45 @@ func TestStandalonePhotos_CreateListDeleteAndViews(t *testing.T) {
 	assert.ErrorIs(t, err, domain.ErrNotFound)
 }
 
+// TestListSnaps_StandalonePhotosOnly reproduces the reported scenario: photos
+// exist but no snap does (GPS-less standalone uploads). Listing snaps must come
+// back empty — a standalone photo must never surface as a phantom snap (e.g. at
+// coordinates 0,0). The photos themselves still belong in the feed.
+func TestListSnaps_StandalonePhotosOnly(t *testing.T) {
+	db := openTestDB(t)
+	var repo repository.SnapRepository = postgres.New(db)
+	ctx := context.Background()
+
+	// Guard against pollution from other rows: this test asserts on the global
+	// snap list, so it must run against a snaps table it owns. Start clean and
+	// restore nothing — the standalone photos are cleaned up below.
+	_, err := db.ExecContext(ctx, `DELETE FROM photos`)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `DELETE FROM snaps`)
+	require.NoError(t, err)
+
+	photos := []domain.Photo{
+		{Token: "tok-orphan-1", StoredKey: "photos/orphan1.jpg"},
+		{Token: "tok-orphan-2", StoredKey: "photos/orphan2.jpg"},
+	}
+	require.NoError(t, repo.CreatePhotos(ctx, photos))
+	t.Cleanup(func() {
+		for _, p := range photos {
+			_ = repo.DeletePhoto(context.Background(), p.ID)
+		}
+	})
+
+	// /snaps must be empty: there are no snaps, only standalone photos.
+	snaps, err := repo.ListSnaps(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, snaps, "standalone photos must not surface as snaps")
+
+	// The feed (/photos) must still contain both standalone photos.
+	all, err := repo.ListAllPhotos(ctx)
+	require.NoError(t, err)
+	assert.Len(t, all, 2, "standalone photos belong in the feed")
+}
+
 func TestCountPhotosForSnap(t *testing.T) {
 	db := openTestDB(t)
 	var repo repository.SnapRepository = postgres.New(db)
