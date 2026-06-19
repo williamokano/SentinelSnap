@@ -20,8 +20,9 @@ func makePNG(w, h int) *bytes.Buffer {
 }
 
 // jpegWithOrientation encodes a w×h JPEG and splices in an EXIF APP1 segment
-// carrying the given Orientation value, mimicking what a phone camera writes.
-func jpegWithOrientation(t *testing.T, w, h, orientation int) []byte {
+// carrying the given Orientation value (1–8), mimicking what a phone camera
+// writes.
+func jpegWithOrientation(t *testing.T, w, h int, orientation byte) []byte {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	// Content is irrelevant to these tests (they assert dimensions); a solid
@@ -34,16 +35,22 @@ func jpegWithOrientation(t *testing.T, w, h, orientation int) []byte {
 	jb := buf.Bytes()
 
 	// Big-endian ("MM") TIFF with a single IFD0 entry: Orientation (0x0112),
-	// type SHORT, count 1, value `orientation`.
+	// type SHORT, count 1. The SHORT value occupies the first 2 of the entry's
+	// 4 value bytes; orientation is 1–8 so the high byte is always 0x00.
 	exif := []byte{
 		'E', 'x', 'i', 'f', 0, 0,
 		'M', 'M', 0x00, 0x2A, 0x00, 0x00, 0x00, 0x08, // TIFF header, IFD0 at offset 8
 		0x00, 0x01, // 1 directory entry
-		0x01, 0x12, 0x00, 0x03, 0x00, 0x00, 0x00, 0x01, byte(orientation >> 8), byte(orientation), 0x00, 0x00,
+		0x01, 0x12, 0x00, 0x03, 0x00, 0x00, 0x00, 0x01, 0x00, orientation, 0x00, 0x00,
 		0x00, 0x00, 0x00, 0x00, // next IFD offset = 0
 	}
-	segLen := len(exif) + 2
-	app1 := append([]byte{0xFF, 0xE1, byte(segLen >> 8), byte(segLen)}, exif...)
+	// Segment length = len(exif) + 2 (the length field counts itself). The EXIF
+	// block above is a fixed 32 bytes, so the length is the literal 0x0022;
+	// guard against the layout drifting.
+	if len(exif)+2 != 0x22 {
+		t.Fatalf("exif block size changed (%d); update the APP1 segment length", len(exif))
+	}
+	app1 := append([]byte{0xFF, 0xE1, 0x00, 0x22}, exif...)
 
 	// Insert APP1 right after the SOI marker (the first two bytes, 0xFFD8).
 	out := append([]byte{}, jb[:2]...)
