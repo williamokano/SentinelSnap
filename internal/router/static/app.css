@@ -69,12 +69,6 @@ body.feed-page { background: #f2f2f5; }
   justify-content: center;
   align-items: center;
   line-height: 0;
-  /* Clip the image to the card's rounded bottom corners here, on the photo
-     wrapper, rather than on .feed-card — putting overflow:hidden on the card
-     also clips the ⋯ dropdown menu, which opens downward from the top bar. */
-  overflow: hidden;
-  border-bottom-left-radius: 10px;
-  border-bottom-right-radius: 10px;
 }
 .feed-img {
   display: block;
