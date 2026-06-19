@@ -39,7 +39,9 @@ function buildCard(photo) {
         </div>
       </div>
     </div>
-    <img class="feed-img" src="${escapeHtml(thumbUrl(photo.url))}" alt="photo" loading="lazy" />
+    <div class="feed-photo">
+      <img class="feed-img" src="${escapeHtml(thumbUrl(photo.url))}" alt="photo" loading="lazy" />
+    </div>
   `;
   return card;
 }
