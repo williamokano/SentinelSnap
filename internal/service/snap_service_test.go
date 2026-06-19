@@ -126,12 +126,13 @@ func TestCreateSnap_CoordinateValidation(t *testing.T) {
 	}
 }
 
-func TestCreateSnap_NullIslandIsValid(t *testing.T) {
+// A snap at coordinates 0,0 ("null island") is rejected: a GPS-less client that
+// omits coordinates sends them as the zero value, and we refuse to create a junk
+// snap pinned to the Atlantic. The request is turned away before any photo is
+// stored or any row is written — such uploads belong on POST /photos instead.
+func TestCreateSnap_NullIslandRejected(t *testing.T) {
 	repo := &repoMock.SnapRepository{}
 	store := &storageMock.StorageProvider{}
-
-	store.On("Put", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
-	repo.On("CreateSnapWithPhotos", mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
 	_, err := newService(repo, store).CreateSnap(context.Background(), service.CreateSnapInput{
 		Latitude:  0,
@@ -139,8 +140,9 @@ func TestCreateSnap_NullIslandIsValid(t *testing.T) {
 		Photos:    []string{pngB64("x")},
 	})
 
-	require.NoError(t, err)
-	repo.AssertExpectations(t)
+	assertValidationError(t, err, "latitude and longitude are required")
+	store.AssertNotCalled(t, "Put")
+	repo.AssertNotCalled(t, "CreateSnapWithPhotos")
 }
 
 func TestCreateSnap_NoPhotos(t *testing.T) {

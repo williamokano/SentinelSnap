@@ -170,12 +170,13 @@ func TestCreateSnap_Success(t *testing.T) {
 	store.AssertExpectations(t)
 }
 
-func TestCreateSnap_NullIslandIsValid(t *testing.T) {
+// A POST /snaps without coordinates decodes latitude/longitude as 0,0 — the
+// zero value of the request fields. Such requests are rejected (400): a snap is
+// a located thing, and a GPS-less upload would otherwise create a junk snap at
+// "null island." These uploads belong on POST /photos instead.
+func TestCreateSnap_NullIslandRejected(t *testing.T) {
 	repo := &repoMock.SnapRepository{}
 	store := &storageMock.StorageProvider{}
-
-	expectCreateSnapWithPhotos(repo, 1)
-	store.On("Put", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
 	req := httptest.NewRequest(http.MethodPost, "/snaps", bytes.NewReader(postBody(0, 0, []string{pngB64("x")})))
 	req.Header.Set("Content-Type", "application/json")
@@ -183,8 +184,9 @@ func TestCreateSnap_NullIslandIsValid(t *testing.T) {
 
 	newHandler(repo, store).CreateSnap(w, req)
 
-	assert.Equal(t, http.StatusCreated, w.Code)
-	repo.AssertExpectations(t)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	repo.AssertNotCalled(t, "CreateSnapWithPhotos")
+	store.AssertNotCalled(t, "Put")
 }
 
 func TestCreateSnap_CoordinatesOutOfRange(t *testing.T) {

@@ -73,6 +73,13 @@ func (s *SnapService) CreateSnap(ctx context.Context, in CreateSnapInput) (*doma
 	if in.Longitude < -180 || in.Longitude > 180 {
 		return nil, &ValidationError{Msg: fmt.Sprintf("longitude must be between -180 and 180, got %g", in.Longitude)}
 	}
+	// Reject "null island" (0,0): a GPS-less client that omits coordinates sends
+	// them as the zero value, which would otherwise create a junk snap pinned to
+	// the Atlantic. A snap is inherently a located thing — uploads without a
+	// real fix belong on POST /photos, which carries no coordinates.
+	if in.Latitude == 0 && in.Longitude == 0 {
+		return nil, &ValidationError{Msg: "latitude and longitude are required: refusing to create a snap at 0,0; GPS-less uploads should use POST /photos"}
+	}
 	if len(in.Photos) == 0 {
 		return nil, &ValidationError{Msg: "at least one photo is required"}
 	}
